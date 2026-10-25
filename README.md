@@ -174,7 +174,7 @@ Actual KPI results should be measured and documented during testing.
 
 ## 9. Instructor
 
-**Instructor Name:** [Enter Instructor Name]
+**Instructor Name:** Ahmed Gamil
 
 ## 10. Project Files
 
