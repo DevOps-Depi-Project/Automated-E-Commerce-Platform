@@ -68,11 +68,13 @@ The platform consists of the following components:
 
 | Name | Role |
 |---|---|
-| Member 1 | DevOps Engineer / Team Leader |
-| Member 2 | CI/CD and Docker Engineer |
-| Member 3 | Kubernetes and Deployment Engineer |
-| Member 4 | AWS and Terraform Engineer |
-| Member 5 | Monitoring and Reliability Engineer |
+| Member 1 | Mosab Mohamed Sayed Ahmed |
+| Member 2 | Fares Ahmed Fathy Ahmed |
+| Member 3 | Ahmed Hossam Mohamed Zaki |
+| Member 4 | Mohamed Ahmed Mahdy Abdelaziz |
+| Member 5 | Mohammed Omar Abdelwahab Hamdallah |
+| Member 6 | Abdulrahman Mustafa Hamed Mustafa |
+
 
 Replace the example entries with the actual team members and their assigned responsibilities.
 
