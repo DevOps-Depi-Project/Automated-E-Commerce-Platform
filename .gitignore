@@ -1,0 +1,37 @@
+# Environment secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Temporary and swap files
+*.swp
+*.swo
+*~
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporarily excluded from GitHub
+/.devcontainer/
+/.github/workflows/
+/k8s/
+/terraform/
+/kubectl-demo.ps1
+/terraform-demo.ps1

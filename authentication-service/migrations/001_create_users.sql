@@ -1,0 +1,10 @@
+CREATE SCHEMA IF NOT EXISTS auth;
+
+CREATE TABLE IF NOT EXISTS auth.users (
+  id UUID PRIMARY KEY,
+  email VARCHAR(254) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  role VARCHAR(20) NOT NULL CHECK (role IN ('customer', 'admin')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
