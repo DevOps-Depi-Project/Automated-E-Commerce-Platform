@@ -1,6 +1,6 @@
-# Payment API Contract (Target Demo)
+# Payment API Contract
 
-**Current state:** no Payment Service exists. **Target:** internal Mock Payment only. It simulates success/failure synchronously; no real payment provider, webhooks, card entry, or card storage. Prefix: `/internal/payments`; calls require Order service authorization.
+**Implemented in** `payment-service/server.js`. Internal Mock Payment only; it is not routed by the gateway and only USD is accepted. It simulates success/failure synchronously; no real payment provider, webhooks, card entry, or card storage. Prefix: `/internal/payments`; calls require Order service authorization.
 
 | Method | Endpoint | Request | Success |
 |---|---|---|---|

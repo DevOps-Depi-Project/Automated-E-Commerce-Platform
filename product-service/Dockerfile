@@ -1,19 +1,18 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json
+ENV NODE_ENV=production
+
 COPY package*.json ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
-# Install dependencies
-RUN npm install --production
-
-# Copy application code
 COPY . .
 
-# Expose port
+# Run as the unprivileged user that ships with the official Node image.
+USER node
+
 EXPOSE 3001
 
-# Start the application
-CMD ["npm", "start"]
+# Run node directly so it receives SIGTERM from "docker stop".
+CMD ["node", "server.js"]

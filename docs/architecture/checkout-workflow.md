@@ -1,8 +1,8 @@
-# Checkout Workflow (Target Demo)
+# Checkout Workflow
 
-## Current state (verified)
+## Current state
 
-The current frontend's `checkout()` in `frontend/index.html` only shows a success message, clears its browser `localStorage` cart, and refreshes the order list; it does not create an order. The separate Quick Buy path posts one product to Order. Current Order checks Product's reported stock but does not change it. The workflow below is the target, not current behavior.
+The workflow below is implemented by Order Service (`order-service/server.js`) together with Product, Inventory and Payment. The storefront clears the Cart only after Order confirms the checkout.
 
 ## Synchronous classroom demo flow
 

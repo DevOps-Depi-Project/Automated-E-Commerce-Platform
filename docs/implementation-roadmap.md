@@ -2,14 +2,14 @@
 
 This is a proposed target plan, not a statement that the services are implemented. Current verified state: static Frontend, Node/Express Product and Order, in-memory Product/Order data, browser-local cart, and existing three-component Docker/Kubernetes configuration. See [overview](architecture/overview.md).
 
-Each phase is completed and reviewed before the next begins. Exactly seven business services remain in scope.
+Each phase is completed and reviewed before the next begins. Eight business services are in scope (Search was added to match the course brief).
 
 ## Phase 1: Architecture & API Contracts
 
 - **Scope:** demo-level service boundaries, PostgreSQL schema ownership, REST contracts, JWT and simple checkout decisions.
 - **Expected files:** `docs/architecture/*.md`, `docs/api-contracts/*.md`, `docs/implementation-roadmap.md`, concise target/current clarification in `README.md`.
 - **Dependencies:** repository audit and team agreement.
-- **Acceptance:** current facts and target are separated; all seven services are covered; contracts and demo workflow are consistent; no application code changed.
+- **Acceptance:** current facts and target are separated; all services are covered; contracts and demo workflow are consistent; no application code changed.
 
 ## Phase 2: Database Foundation and Product/Order Persistence
 
@@ -55,7 +55,7 @@ Each phase is completed and reviewed before the next begins. Exactly seven busin
 
 ## Phase 8: Docker, Kubernetes, CI/CD and optional Monitoring
 
-- **Scope:** Dockerfile for each of the seven services; local Compose setup; Kubernetes Deployment/Service for each; Gateway/Ingress; GitHub Actions build/lint/API checks; optional Prometheus/Grafana if time allows.
+- **Scope:** Dockerfile for each of the eight services; local Compose setup; Kubernetes Deployment/Service for each; Gateway/Ingress; GitHub Actions build/lint/API checks; optional Prometheus/Grafana if time allows.
 - **Expected files:** service Dockerfiles; `docker-compose.yml`; `k8s/` manifests; `.github/workflows/` updates; monitoring manifests/config only if the core is complete; README setup/demo instructions.
-- **Dependencies:** all seven services and working end-to-end scenario.
-- **Acceptance:** one documented command path builds/starts the demo; all seven services are independently deployed/routable in Kubernetes; CI checks service packages and basic API behavior; optional dashboards show service health/metrics. Do not let monitoring block demo completion.
+- **Dependencies:** all eight services and working end-to-end scenario.
+- **Acceptance:** one documented command path builds/starts the demo; all eight services are independently deployed/routable in Kubernetes; CI checks service packages and basic API behavior; optional dashboards show service health/metrics. Do not let monitoring block demo completion.

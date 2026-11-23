@@ -1,6 +1,6 @@
-# Authentication API Contract (Target Demo)
+# Authentication API Contract
 
-**Current state:** no Authentication Service or auth middleware exists in the repository. **Target:** a simple JWT login for the university demo. Prefix: `/api/v1/auth`. No Refresh Tokens or OAuth are included. The JWT signing key is supplied through `JWT_SECRET`, not committed, and used consistently by the services that verify tokens locally.
+**Implemented in** `authentication-service/server.js`. A simple JWT login for the university demo. Gateway path: `/api/auth` (for example `POST /api/auth/login`). No Refresh Tokens or OAuth are included. The JWT signing key is supplied through `JWT_SECRET`, not committed, and used consistently by the services that verify tokens locally.
 
 ## Endpoints
 

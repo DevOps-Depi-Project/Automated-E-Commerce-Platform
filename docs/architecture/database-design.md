@@ -1,8 +1,8 @@
-# Database Design (Target Demo)
+# Database Design
 
-## Current state (verified)
+## Current state
 
-There is no database dependency or database configuration in the current repository. Product and Order state are JavaScript arrays in their service processes; the browser cart is stored in `localStorage`. The following is a proposed target for the demo.
+Each service below creates its schema and tables with the migration in its `migrations/` folder when its container starts.
 
 ## One PostgreSQL server, logical ownership
 
@@ -15,9 +15,10 @@ Run one PostgreSQL server for the project. Give each data-owning service its own
 | `carts` / Cart | `carts(id, user_id, updated_at)`; `cart_items(cart_id, product_id, quantity)`. Product IDs are references across APIs, not cross-schema foreign keys. |
 | `inventory` / Inventory | `inventory_items(product_id, available_quantity)` with `UNIQUE(product_id)` (or `product_id` as the primary key), ensuring one inventory row per product; `reservations(id, order_id, status, expires_at)` with `UNIQUE(order_id)`; `reservation_items(reservation_id, product_id, quantity)`. |
 | `orders` / Order | `orders(id, user_id, status, total, currency, idempotency_key, request_hash, created_at)`; `UNIQUE(user_id, idempotency_key)`; `order_items(id, order_id, product_id, product_name_snapshot, unit_price_snapshot, quantity)`. |
+| `search` / Search | `products(product_id, name, description, category, price, currency, image_url, search_vector)` read model with GIN full-text and `pg_trgm` trigram indexes; `sync_state(last_success_at, product_count)`. Copied from Product's public API; not a source of truth. |
 | `payments` / Payment | `payment_attempts(id, order_id, result, amount, created_at)` with `UNIQUE(order_id)` to allow at most one Mock Payment attempt per order in this demo. |
 
-All tables, columns, and constraints in this section are part of the **target database design only**; no database or these tables currently exist in the repository. Use IDs and basic constraints consistently; keep money in a suitable decimal type or integer minor units and never use floating point for persisted totals. Order snapshots the product name and price so later catalog edits do not change order history. `request_hash` stores a hash of the normalized checkout request so Order can verify that a repeated `(user_id, idempotency_key)` represents the same request; a mismatch is rejected rather than treated as a retry.
+Use IDs and basic constraints consistently; keep money in a suitable decimal type or integer minor units and never use floating point for persisted totals. Order snapshots the product name and price so later catalog edits do not change order history. `request_hash` stores a hash of the normalized checkout request so Order can verify that a repeated `(user_id, idempotency_key)` represents the same request; a mismatch is rejected rather than treated as a retry.
 
 ## Service-to-service data
 
