@@ -1,8 +1,15 @@
-version: '3.8'
+# Shared healthcheck settings for the Node.js services.
+# BusyBox wget (built into Alpine) is far lighter than starting a node process per check.
+x-node-healthcheck: &node-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
 
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ecommerce}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -21,13 +28,17 @@ services:
     build:
       context: ./authentication-service
       dockerfile: Dockerfile
-    command: sh -c 'npm run migrate && if [ -n "$$ADMIN_EMAIL" ] && [ -n "$$ADMIN_PASSWORD" ]; then npm run seed:admin; fi && npm start'
-    ports:
-      - "3003:3003"
+    restart: unless-stopped
+    # A bad ADMIN_* value is logged but does not stop the service from starting.
+    command: sh -c 'npm run migrate && { if [ -n "$$ADMIN_EMAIL" ] && [ -n "$$ADMIN_PASSWORD" ]; then npm run seed:admin || echo "WARNING - admin seed failed, continuing without it"; fi; } && exec node server.js'
+    # Internal only: the browser reaches this service through Nginx at /api/...
+    expose:
+      - "3003"
     environment:
       PORT: 3003
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_NAME: ${ADMIN_NAME:-Demo Admin}
@@ -38,18 +49,18 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3003/health"]
 
   product-service:
     build:
       context: ./product-service
       dockerfile: Dockerfile
-    command: sh -c "npm run migrate && npm start"
-    ports:
-      - "3001:3001"
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
+    # Internal only: the browser reaches this service through Nginx at /api/...
+    expose:
+      - "3001"
     environment:
       PORT: 3001
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
@@ -61,18 +72,18 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3001/health"]
 
   cart-service:
     build:
       context: ./cart-service
       dockerfile: Dockerfile
-    command: sh -c "npm run migrate && npm start"
-    ports:
-      - "3006:3006"
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
+    # Internal only: the browser reaches this service through Nginx at /api/...
+    expose:
+      - "3006"
     environment:
       PORT: 3006
       NODE_ENV: production
@@ -87,18 +98,18 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3006/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3006/health"]
 
   inventory-service:
     build:
       context: ./inventory-service
       dockerfile: Dockerfile
-    command: sh -c "npm run migrate && npm start"
-    ports:
-      - "3004:3004"
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
+    # Internal only: the browser reaches this service through Nginx at /api/...
+    expose:
+      - "3004"
     environment:
       PORT: 3004
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
@@ -112,18 +123,18 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3004/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3004/health"]
 
   order-service:
     build:
       context: ./order-service
       dockerfile: Dockerfile
-    command: sh -c "npm run migrate && npm start"
-    ports:
-      - "3002:3002"
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
+    # Internal only: the browser reaches this service through Nginx at /api/...
+    expose:
+      - "3002"
     environment:
       PORT: 3002
       NODE_ENV: production
@@ -145,16 +156,15 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3002/health"]
 
   payment-service:
     build:
       context: ./payment-service
       dockerfile: Dockerfile
-    command: sh -c "npm run migrate && npm start"
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
     expose:
       - "3005"
     environment:
@@ -162,6 +172,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env}
+      # Note: simulation is always disabled while NODE_ENV=production (see payment-service/server.js).
       PAYMENT_SIMULATION_ENABLED: ${PAYMENT_SIMULATION_ENABLED:-false}
       PAYMENT_DEFAULT_RESULT: ${PAYMENT_DEFAULT_RESULT:-success}
     depends_on:
@@ -170,15 +181,39 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3005/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3005/health"]
+
+  search-service:
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: sh -c "npm run migrate && exec node server.js"
+    expose:
+      - "3007"
+    environment:
+      PORT: 3007
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
+      PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL:-http://product-service:3001}
+      SEARCH_SYNC_INTERVAL_SECONDS: ${SEARCH_SYNC_INTERVAL_SECONDS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3007/health"]
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:
@@ -192,8 +227,15 @@ services:
         condition: service_healthy
       inventory-service:
         condition: service_healthy
+      search-service:
+        condition: service_healthy
     networks:
       - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

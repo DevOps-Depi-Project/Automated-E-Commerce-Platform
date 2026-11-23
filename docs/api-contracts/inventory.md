@@ -1,10 +1,12 @@
-# Inventory API Contract (Target Demo)
+# Inventory API Contract
 
-**Current state:** no Inventory Service exists. The current Order Service checks `product.stock` but does not decrement or reserve it. **Target:** Inventory alone owns and updates quantities. Gateway can expose read-only availability; reservation operations are internal to Order/Inventory and require service authorization.
+**Implemented in** `inventory-service/server.js`. Inventory alone owns and updates quantities. Gateway path: `/api/inventory` (for example `GET /api/inventory/inventory/1`); the `/internal/...` routes are not routed by the gateway. Gateway can expose read-only availability; reservation operations are internal to Order/Inventory and require service authorization.
 
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/inventory/:productId` | Public | Read available quantity for display. |
+| `GET` | `/inventory/` | Public | Available quantity of every product (storefront and admin). |
+| `GET` | `/inventory/:productId` | Public | Read available quantity for display. |
+| `POST` | `/inventory/:productId/adjustments` | Admin JWT | `{"action":"add","quantity":5}` (or `"subtract"`); adding creates the record if missing. |
 | `POST` | `/internal/reservations` | Order service | Reserve order lines. |
 | `POST` | `/internal/reservations/:id/commit` | Order service | Finalize reserved quantity after mock payment success. |
 | `POST` | `/internal/reservations/:id/release` | Order service | Release reservation after failure. |

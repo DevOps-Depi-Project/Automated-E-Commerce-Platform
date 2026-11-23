@@ -399,6 +399,14 @@ async function startPayment(order, simulatePayment) {
     });
     return response.data && response.data.data;
   } catch (error) {
+    // A 400 means Payment Service understood the request and refused it (for example an
+    // unsupported currency). Retrying will not help, so surface it instead of a 503.
+    if (error.response && error.response.status === 400) {
+      const responseError = error.response.data && error.response.data.error;
+      const detail = responseError && Array.isArray(responseError.details) && responseError.details[0];
+      throw new ApiError(409, 'PAYMENT_REJECTED',
+        (detail && detail.message) || 'Payment Service rejected the payment request');
+    }
     throw new ApiError(503, 'DEPENDENCY_UNAVAILABLE', 'Payment Service is unavailable');
   }
 }
@@ -485,7 +493,16 @@ async function processPendingOrder(orderId, simulatePayment) {
   } else if (order.paymentId) {
     payment = validatePaymentResult(await readPayment({ ...order, payment_id: order.paymentId }), order);
   } else {
-    payment = validatePaymentResult(await startPayment(order, simulatePayment), order);
+    try {
+      payment = validatePaymentResult(await startPayment(order, simulatePayment), order);
+    } catch (error) {
+      if (error.code === 'PAYMENT_REJECTED') {
+        // Give the held stock back immediately instead of waiting for the reservation TTL.
+        await releaseReservation(reservation.reservationId);
+        await updateOrder(order.id, { status: 'FAILED', failure_reason: 'PAYMENT_REJECTED' });
+      }
+      throw error;
+    }
   }
 
   if (payment.paymentId && payment.paymentId !== order.paymentId) {
@@ -547,6 +564,9 @@ function getStoredFailure(order) {
   }
   if (order.failureReason === 'RESERVATION_RELEASED') {
     return new ApiError(409, 'ORDER_STATE_CONFLICT', 'The inventory reservation was released');
+  }
+  if (order.failureReason === 'PAYMENT_REJECTED') {
+    return new ApiError(409, 'PAYMENT_REJECTED', 'The payment request was rejected by Payment Service');
   }
   return null;
 }

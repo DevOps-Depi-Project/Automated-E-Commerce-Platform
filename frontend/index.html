@@ -68,6 +68,7 @@
         .filter-controls select,.filter-controls input { min-height:39px; max-width:165px; padding:0 11px; border:1px solid var(--border-color); border-radius:9px; background:white; font-size:.81rem; }
         .filter-controls input { width:118px; }
         .filter-controls select:focus,.filter-controls input:focus { outline:0; border-color:#9da9c2; box-shadow:0 0 0 3px rgba(37,59,112,.07); }
+        .search-summary { min-height:18px; margin:-8px 0 12px; color:var(--text-secondary); font-size:.8rem; }
         .products-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:17px; margin-bottom:54px; }
         .product-card { overflow:hidden; padding:0; border:1px solid var(--border-color); border-radius:16px; background:white; box-shadow:var(--shadow-sm); transition:transform .2s,box-shadow .2s,border-color .2s; }
         .product-card::before { display:none; }
@@ -270,7 +271,7 @@
                     <a id="admin-nav-link" href="/admin" hidden>Admin</a>
                 </nav>
                 <div class="header-search">
-                    <input type="search" id="search-input" placeholder="Search products..." aria-label="Search products" onkeyup="filterProducts()">
+                    <input type="search" id="search-input" placeholder="Search products..." aria-label="Search products" oninput="filterProducts()">
                 </div>
                 <div class="header-actions">
                     <div class="stats" hidden aria-hidden="true">
@@ -347,24 +348,25 @@
         <div class="main-layout">
             <aside class="category-sidebar">
                 <h3>Categories</h3>
-                <div class="category-list">
-                    <button class="category-btn active" onclick="selectCategory('', this)">
+                <!-- Static defaults; replaced by the categories returned by Search Service. -->
+                <div class="category-list" id="category-list">
+                    <button class="category-btn active" type="button" data-category="" onclick="selectCategory(this.dataset.category, this)">
                         <span class="category-icon">🛍️</span>
                         All Products
                     </button>
-                    <button class="category-btn" onclick="selectCategory('electronics', this)">
+                    <button class="category-btn" type="button" data-category="electronics" onclick="selectCategory(this.dataset.category, this)">
                         <span class="category-icon">💻</span>
                         Electronics
                     </button>
-                    <button class="category-btn" onclick="selectCategory('clothing', this)">
+                    <button class="category-btn" type="button" data-category="clothing" onclick="selectCategory(this.dataset.category, this)">
                         <span class="category-icon">👕</span>
                         Clothing
                     </button>
-                    <button class="category-btn" onclick="selectCategory('books', this)">
+                    <button class="category-btn" type="button" data-category="books" onclick="selectCategory(this.dataset.category, this)">
                         <span class="category-icon">📚</span>
                         Books
                     </button>
-                    <button class="category-btn" onclick="selectCategory('home', this)">
+                    <button class="category-btn" type="button" data-category="home" onclick="selectCategory(this.dataset.category, this)">
                         <span class="category-icon">🏠</span>
                         Home & Garden
                     </button>
@@ -376,7 +378,7 @@
                 <h2 class="section-title">Featured Products</h2>
                 <div class="search-controls">
                     <div class="filter-controls">
-                        <select id="category-filter" onchange="filterProducts()">
+                        <select id="category-filter" onchange="syncCategoryButtons(); filterProducts()">
                             <option value="">All Categories</option>
                             <option value="electronics">Electronics</option>
                             <option value="clothing">Clothing</option>
@@ -390,10 +392,11 @@
                             <option value="price-asc">Price (Low to High)</option>
                             <option value="price-desc">Price (High to Low)</option>
                         </select>
-                        <input type="number" id="price-max" placeholder="Max Price" onkeyup="filterProducts()">
+                        <input type="number" id="price-max" placeholder="Max Price" min="0" oninput="filterProducts()">
                     </div>
                 </div>
             </div>
+            <p id="search-summary" class="search-summary" aria-live="polite"></p>
             <div id="products-grid" class="products-grid"></div>
         </section>
 
@@ -495,16 +498,16 @@
     </div>
 
     <script>
-        // Compose publishes these services to the browser host; service-to-service URLs stay internal.
-        const SERVICE_HOST = window.location.hostname || 'localhost';
-        const SERVICE_ORIGIN = window.location.protocol + '//' + SERVICE_HOST;
+        // All API calls go to the same origin; Nginx (frontend/nginx.conf) routes /api/<service>/ to each service.
         const API_URLS = {
-            authentication: SERVICE_ORIGIN + ':3003',
-            product: SERVICE_ORIGIN + ':3001',
-            order: SERVICE_ORIGIN + ':3002',
-            cart: SERVICE_ORIGIN + ':3006',
-            inventory: SERVICE_ORIGIN + ':3004'
+            authentication: '/api/auth',
+            product: '/api/product',
+            order: '/api/order',
+            cart: '/api/cart',
+            inventory: '/api/inventory',
+            search: '/api/search'
         };
+        const SEARCH_DEBOUNCE_MS = 250;
         const TOKEN_KEY = 'ecommerce_access_token';
         const CHECKOUT_RETRY_KEY = 'ecommerce_checkout_retry';
 
@@ -517,6 +520,11 @@
         let checkoutAttempt = null;
         let sessionUnauthorizedHandled = false;
         let inventoryByProduct = {};
+        // null = still loading, true = loaded, false = Inventory Service unavailable.
+        let inventoryLoaded = null;
+        let catalogLoaded = false;
+        let searchTimer = null;
+        let searchRequestId = 0;
         let adminProducts = [];
         let adminInventory = [];
         let adminOrders = [];
@@ -592,8 +600,9 @@
                 return;
             }
 
-            await Promise.all([loadProducts(), restoreSession()]);
-            filterProducts();
+            loadCategories();
+            loadInventoryAvailability();
+            await Promise.all([runSearch(true), restoreSession()]);
         }
 
         async function apiRequest(service, path, options = {}) {
@@ -606,7 +615,7 @@
                 if (options.body !== undefined) fetchOptions.body = options.body;
                 response = await fetch(API_URLS[service] + path, fetchOptions);
             } catch (error) {
-                throw new Error('Could not reach ' + service + ' service. Check that it is running and its browser port is reachable.');
+                throw new Error('Could not reach the ' + service + ' service. Check that the Docker Compose stack is running.');
             }
             let payload = null;
             if (response.status !== 204) {
@@ -647,6 +656,7 @@
                 INSUFFICIENT_STOCK: 'There is not enough stock to complete this order.',
                 IDEMPOTENCY_KEY_REUSED: 'This checkout key was already used for different cart contents.',
                 ORDER_STATE_CONFLICT: 'The order could not continue. Review its status and try a new checkout if appropriate.',
+                PAYMENT_REJECTED: 'The payment was rejected (this demo only accepts USD prices). The order was cancelled and stock was released.',
                 DEPENDENCY_UNAVAILABLE: 'A required service is temporarily unavailable. Your order may still be pending; retry checkout with the same cart.',
                 PRODUCT_SERVICE_UNAVAILABLE: 'Product information is temporarily unavailable.',
                 SERVICE_UNAVAILABLE: 'A required service is temporarily unavailable.'
@@ -793,26 +803,123 @@
         }
 
         function selectCategory(category, element) {
-            document.querySelectorAll('.category-btn').forEach(button => button.classList.remove('active'));
-            element.classList.add('active');
             document.getElementById('category-filter').value = category;
+            syncCategoryButtons(element);
             filterProducts();
         }
 
-        function filterProducts() {
-            const search = document.getElementById('search-input').value.trim().toLowerCase();
-            const category = document.getElementById('category-filter').value.toLowerCase();
-            const sort = document.getElementById('sort-filter').value;
+        function syncCategoryButtons(activeButton) {
+            const category = document.getElementById('category-filter').value;
+            document.querySelectorAll('#category-list .category-btn').forEach(button => {
+                const value = button.dataset.category !== undefined ? button.dataset.category : null;
+                const isActive = activeButton ? button === activeButton : value === category;
+                button.classList.toggle('active', isActive);
+            });
+        }
+
+        const CATEGORY_ICONS = { electronics: '💻', clothing: '👕', books: '📚', home: '🏠' };
+
+        // Builds category buttons and the category dropdown from the live catalog (Search Service).
+        // If the service is unavailable, the static defaults in the HTML stay in place.
+        async function loadCategories() {
+            try {
+                const response = await apiRequest('search', '/search/categories', { auth: false });
+                const categories = Array.isArray(response.data) ? response.data : [];
+                if (!categories.length) return;
+                const selected = document.getElementById('category-filter').value;
+                const total = categories.reduce((sum, item) => sum + Number(item.count || 0), 0);
+                const label = value => {
+                    const text = String(value || '');
+                    return text.charAt(0).toUpperCase() + text.slice(1);
+                };
+                document.getElementById('category-list').innerHTML =
+                    '<button class="category-btn" type="button" data-category="" onclick="selectCategory(this.dataset.category, this)"><span class="category-icon">🛍️</span> All Products (' + total + ')</button>' +
+                    categories.map(item => '<button class="category-btn" type="button" data-category="' + escapeHtml(item.category) + '" onclick="selectCategory(this.dataset.category, this)">' +
+                        '<span class="category-icon">' + (CATEGORY_ICONS[item.category] || '🏷️') + '</span> ' + escapeHtml(label(item.label)) + ' (' + Number(item.count) + ')</button>').join('');
+                document.getElementById('category-filter').innerHTML = '<option value="">All Categories</option>' +
+                    categories.map(item => '<option value="' + escapeHtml(item.category) + '">' + escapeHtml(label(item.label)) + '</option>').join('');
+                if (categories.some(item => item.category === selected)) {
+                    document.getElementById('category-filter').value = selected;
+                }
+                syncCategoryButtons();
+            } catch (error) {
+                console.warn('Categories are unavailable; keeping the default list.', error.message);
+            }
+        }
+
+        function readSearchFilters() {
             const rawMaxPrice = document.getElementById('price-max').value;
-            const maxPriceValue = Number(rawMaxPrice);
-            const maxPrice = rawMaxPrice === '' ? Infinity : maxPriceValue;
+            const maxPrice = Number(rawMaxPrice);
+            return {
+                q: document.getElementById('search-input').value.trim(),
+                category: document.getElementById('category-filter').value,
+                sort: document.getElementById('sort-filter').value,
+                maxPrice: rawMaxPrice !== '' && Number.isFinite(maxPrice) && maxPrice >= 0 ? maxPrice : null
+            };
+        }
+
+        // Called on every keystroke or filter change; waits briefly so typing does not flood the API.
+        function filterProducts() {
+            window.clearTimeout(searchTimer);
+            searchTimer = window.setTimeout(() => runSearch(false), SEARCH_DEBOUNCE_MS);
+        }
+
+        async function runSearch(showSpinner) {
+            const requestId = ++searchRequestId;
+            const filters = readSearchFilters();
+            const params = new URLSearchParams({ page: '1', pageSize: '100' });
+            if (filters.q) params.set('q', filters.q.slice(0, 100));
+            if (filters.category) params.set('category', filters.category);
+            if (filters.sort) params.set('sort', filters.sort);
+            if (filters.maxPrice !== null) params.set('maxPrice', filters.maxPrice.toFixed(2));
+
+            const loading = document.getElementById('loading-message');
+            if (showSpinner) loading.style.display = 'block';
+            try {
+                const response = await apiRequest('search', '/search?' + params.toString(), { auth: false });
+                if (requestId !== searchRequestId) return; // A newer search already started.
+                filteredProducts = Array.isArray(response.data) ? response.data : [];
+                const meta = response.meta || {};
+                document.getElementById('total-products').textContent = meta.totalItems || filteredProducts.length;
+                setSearchSummary(filters.q
+                    ? (meta.totalItems || 0) + ' result' + (meta.totalItems === 1 ? '' : 's') + ' for “' + filters.q + '”'
+                    : '');
+                displayProducts();
+            } catch (error) {
+                if (requestId !== searchRequestId) return;
+                await filterProductsLocally(filters, requestId);
+            } finally {
+                if (showSpinner) loading.style.display = 'none';
+            }
+        }
+
+        // Fallback when Search Service is unavailable: load the catalog from Product Service and filter in the browser.
+        async function filterProductsLocally(filters, requestId) {
+            if (!catalogLoaded) {
+                try {
+                    const response = await apiRequest('product', '/products?page=1&pageSize=100', { auth: false });
+                    products = Array.isArray(response.data) ? response.data : [];
+                    catalogLoaded = true;
+                } catch (error) {
+                    if (requestId !== searchRequestId) return;
+                    filteredProducts = [];
+                    setSearchSummary('');
+                    displayProducts();
+                    showMessage('error', error.message);
+                    return;
+                }
+            }
+            if (requestId !== searchRequestId) return;
+            const search = filters.q.toLowerCase();
+            const category = filters.category.toLowerCase();
+            const maxPrice = filters.maxPrice === null ? Infinity : filters.maxPrice;
             filteredProducts = products.filter(product => {
                 const matchesText = !search || (product.name + ' ' + (product.description || '')).toLowerCase().includes(search);
                 const matchesCategory = !category || String(product.category || '').toLowerCase() === category;
                 return matchesText && matchesCategory && Number(product.price) <= maxPrice;
             });
-            if (sort) {
-                const parts = sort.split('-');
+            if (filters.sort) {
+                const parts = filters.sort.split('-');
                 filteredProducts.sort((left, right) => {
                     const a = parts[0] === 'name' ? left.name.toLowerCase() : Number(left.price);
                     const b = parts[0] === 'name' ? right.name.toLowerCase() : Number(right.price);
@@ -821,24 +928,13 @@
                     return parts[1] === 'desc' ? -comparison : comparison;
                 });
             }
+            document.getElementById('total-products').textContent = products.length;
+            setSearchSummary('Search service is unavailable; showing basic results.');
             displayProducts();
         }
 
-        async function loadProducts() {
-            const loading = document.getElementById('loading-message');
-            loading.style.display = 'block';
-            try {
-                const response = await apiRequest('product', '/products?page=1&pageSize=100', { auth: false });
-                products = Array.isArray(response.data) ? response.data : [];
-                inventoryByProduct = {};
-                filterProducts();
-                document.getElementById('total-products').textContent = products.length;
-                loadInventoryAvailability();
-            } catch (error) {
-                showMessage('error', error.message);
-            } finally {
-                loading.style.display = 'none';
-            }
+        function setSearchSummary(text) {
+            document.getElementById('search-summary').textContent = text || '';
         }
 
         async function loadInventoryAvailability() {
@@ -850,16 +946,24 @@
                         ? item.availableQuantity
                         : null;
                 });
-                products.forEach(product => {
-                    const productId = Number(product.id);
-                    if (!Object.prototype.hasOwnProperty.call(inventoryByProduct, productId)) {
-                        inventoryByProduct[productId] = null;
-                    }
-                });
+                inventoryLoaded = true;
             } catch (error) {
-                products.forEach(product => { inventoryByProduct[Number(product.id)] = null; });
+                inventoryByProduct = {};
+                inventoryLoaded = false;
             }
             displayProducts();
+        }
+
+        function stockState(productId) {
+            if (inventoryLoaded === null) return { message: 'Loading stock…', className: '', outOfStock: false };
+            if (inventoryLoaded === false) return { message: 'Stock unavailable', className: '', outOfStock: false };
+            // A product without an inventory record has no stock to reserve.
+            const quantity = Object.prototype.hasOwnProperty.call(inventoryByProduct, productId)
+                ? inventoryByProduct[productId]
+                : 0;
+            if (quantity === null) return { message: 'Stock unavailable', className: '', outOfStock: false };
+            if (quantity <= 0) return { message: 'Out of Stock', className: ' empty', outOfStock: true };
+            return { message: escapeHtml(String(quantity)) + ' available', className: ' available', outOfStock: false };
         }
 
         function displayProducts() {
@@ -870,26 +974,19 @@
             }
             grid.innerHTML = filteredProducts.map(product => {
                 const id = Number(product.id);
-                const hasInventory = Object.prototype.hasOwnProperty.call(inventoryByProduct, id);
-                const availableQuantity = inventoryByProduct[id];
-                const isOutOfStock = hasInventory && availableQuantity === 0;
-                const stockClass = isOutOfStock ? ' empty' : (hasInventory && availableQuantity !== null ? ' available' : '');
+                const stock = stockState(id);
                 const imageUrl = typeof product.imageUrl === 'string' && /^https?:\/\//i.test(product.imageUrl)
                     ? '<img src="' + escapeHtml(product.imageUrl) + '" alt="' + escapeHtml(product.name) + '" loading="lazy">'
                     : '<span>◇</span>';
-                const stockMessage = !hasInventory
-                    ? 'Loading stock…'
-                    : availableQuantity === null ? 'Stock unavailable'
-                        : isOutOfStock ? 'Out of Stock' : escapeHtml(String(availableQuantity)) + ' available';
                 return '<article class="product-card">' +
                     '<div class="product-visual">' + imageUrl + '</div><div class="product-body"><div class="product-header"><div><div class="product-name">' + escapeHtml(product.name) + '</div>' +
                     '<div class="product-price">' + escapeHtml(formatPrice(product.price, product.currency)) + '</div></div>' +
                     '<div class="product-badge">' + escapeHtml(product.category || 'Product') + '</div></div>' +
                     '<div class="product-description">' + escapeHtml(product.description || '') + '</div>' +
-                    '<div class="product-stock' + stockClass + '"><span class="product-stock-dot"></span><span>' + stockMessage + '</span></div>' +
+                    '<div class="product-stock' + stock.className + '"><span class="product-stock-dot"></span><span>' + stock.message + '</span></div>' +
                     '<div class="product-actions"><div class="form-row"><div class="form-group">' +
                     '<label for="quantity-' + id + '">Quantity</label><input type="number" id="quantity-' + id + '" class="quantity-input" min="1" step="1" value="1"></div></div>' +
-                    '<button class="btn" type="button"' + (isOutOfStock ? ' disabled' : '') + ' onclick="addToCart(' + id + ')">' + (isOutOfStock ? 'Out of Stock' : '🛒 Add to Cart') + '</button></div></div></article>';
+                    '<button class="btn" type="button"' + (stock.outOfStock ? ' disabled' : '') + ' onclick="addToCart(' + id + ')">' + (stock.outOfStock ? 'Out of Stock' : '🛒 Add to Cart') + '</button></div></div></article>';
             }).join('');
         }
 
@@ -1015,7 +1112,9 @@
                 await loadAdminProducts(true);
                 await loadAdminInventory(true);
                 updateAdminSummary();
-                setAdminStatus(editingId ? 'Product updated.' : 'Product created. Add inventory from the Inventory section.');
+                setAdminStatus(editingId
+                    ? 'Product updated. Storefront search picks up the change within about 30 seconds.'
+                    : 'Product created. Add inventory from the Inventory section; it appears in storefront search within about 30 seconds.');
             } catch (error) {
                 setAdminStatus(error.message, true);
             } finally {
@@ -1309,7 +1408,7 @@
                 }
             } catch (error) {
                 if (error.sessionUnauthorized) return;
-                if (error.code === 'INSUFFICIENT_STOCK' || error.code === 'ORDER_STATE_CONFLICT') clearCheckoutAttempt();
+                if (['INSUFFICIENT_STOCK', 'ORDER_STATE_CONFLICT', 'PAYMENT_REJECTED'].includes(error.code)) clearCheckoutAttempt();
                 setCheckoutStatus(error.message + (checkoutAttempt ? ' Retry with the same cart to reuse the request key.' : ''), true);
                 await loadOrders();
             } finally {

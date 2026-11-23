@@ -1,10 +1,10 @@
 # Architecture Decisions for the University Demo
 
-These are target-demo decisions, not claims about the current repository. The existing project currently has Frontend, Product, and Order only, with in-memory Product/Order data; see [overview](overview.md).
+These decisions describe the implemented demo; see [overview](overview.md).
 
-## Keep exactly seven business services
+## Eight business services
 
-Frontend, Authentication, Cart, Payment, Inventory, Product, and Order. PostgreSQL, Gateway/Ingress, Prometheus, and Grafana are infrastructure, not additional business services.
+Frontend, Authentication, Cart, Payment, Inventory, Product, Order, and Search. The course brief lists search as one of the platform's core components (web, database, payment, search), so it is a separate service rather than a query inside Product. PostgreSQL, Gateway/Ingress, Prometheus, and Grafana are infrastructure, not additional business services.
 
 ## One PostgreSQL server with service-owned schemas
 
@@ -12,7 +12,7 @@ Use one local PostgreSQL instance to keep setup approachable. Give each data-own
 
 ## REST and gateway routing
 
-Use synchronous REST for browser-to-service (through Gateway/Ingress) and service-to-service calls. Gateway routes page/assets to Frontend and `/api/v1/...` to backend APIs. This is straightforward to explain and inspect with browser tools/curl.
+Use synchronous REST for browser-to-service (through Gateway/Ingress) and service-to-service calls. Nginx in the frontend container acts as the gateway: it serves pages/assets and routes `/api/<service>/...` to backend APIs, so only one port is published. This is straightforward to explain and inspect with browser tools/curl.
 
 ## JWT authentication
 
@@ -27,6 +27,10 @@ Keep failure states visible and explainable; no production Saga framework, outbo
 ## Inventory quantity meaning
 
 `available_quantity` is the amount still open for reservation. Reserve atomically subtracts quantity and creates a held reservation in one database transaction; a conditional update prevents concurrent overselling. Commit only finalizes the held reservation and subtracts nothing further. Release returns held quantity to `available_quantity` once. Expiry also returns it once when discovered by an Inventory request. If Mock Payment succeeded but a temporary Commit error occurs, keep Order `PENDING`; only mark it `CONFIRMED` after Commit succeeds. A retry resumes Commit using the existing reservation and payment result.
+
+## Search as a separate read model
+
+Search keeps its own copy of the active catalog in the `search` schema and refreshes it by polling Product's public `GET /products` API every 30 seconds. This keeps data ownership intact (Search never touches the `products` schema), lets search keep working while Product is down, and lets Search scale independently. The trade-off is eventual consistency: catalog changes reach search results within one sync interval. Polling was chosen over events because the demo has no message broker.
 
 ## Defer Redis and RabbitMQ
 

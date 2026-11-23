@@ -1,11 +1,12 @@
-# Product API Contract (Target Demo)
+# Product API Contract
 
-**Current state:** `product-service/server.js` currently implements `GET /`, `GET /products`, `GET /products/:id`, `POST /products`, and `GET /health`; it stores data in memory and includes a `stock` field. **Target:** Product owns catalog and price only; Inventory owns stock. Gateway prefix: `/api/v1/products`.
+**Implemented in** `product-service/server.js`. Product owns catalog and price only; Inventory owns stock. Service prefix: `/products`; gateway path: `/api/product/products`. Storefront search is served by [Search Service](search.md), which mirrors this catalog.
 
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/` | Public | Paginated catalog; optional `page`, `pageSize`, `q`, `category`. |
-| `GET` | `/:productId` | Public | Read one product. |
+| `GET` | `/:productId` | Public | Read one active product. |
+| `GET` | `/admin/products` (no `/products` prefix) | Admin JWT | All products including inactive ones. |
 | `POST` | `/` | Admin JWT | Add product. |
 | `PUT` | `/:productId` | Admin JWT | Replace editable catalog fields. |
 | `DELETE` | `/:productId` | Admin JWT | Deactivate product for demo. |

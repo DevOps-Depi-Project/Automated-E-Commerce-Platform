@@ -1,8 +1,8 @@
-# Frontend and Shared API Conventions (Target Demo)
+# Frontend and Shared API Conventions
 
-**Current state:** `frontend/index.html` is a static page with inline JavaScript. It calls Product and Order directly using host-port replacement, stores the cart in `localStorage`, and its `checkout()` does not create an order. **Target:** frontend is presentation only and calls APIs through API Gateway/Ingress.
+**Implemented in** `frontend/index.html` (storefront and `/admin` dashboard) and `frontend/nginx.conf`. The frontend is presentation only and calls every API through the Nginx reverse proxy on the same origin.
 
-Gateway routes `/` and static asset paths to Frontend. It separately routes `/api/v1/auth/*`, `/api/v1/products/*`, `/cart/*`, `/orders/*`, and `/inventory/*` to their APIs. Internal Mock Payment and Inventory mutation endpoints are not exposed to the public browser. Frontend does not embed service addresses or secrets.
+Nginx serves `/` and static files, and routes `/api/<service>/<path>` to `<service>:<port>/<path>` for `auth`, `product`, `cart`, `inventory`, `order` and `search`. Unknown `/api/...` paths return a JSON `404`, and an unreachable service returns a JSON `503 SERVICE_UNAVAILABLE`. Internal Mock Payment and Inventory mutation endpoints are not exposed to the public browser. Frontend does not embed service addresses or secrets.
 
 ## Shared request and response format
 

@@ -1,6 +1,6 @@
-# Cart API Contract (Target Demo)
+# Cart API Contract
 
-**Current state:** there is no Cart Service. The current frontend stores cart lines in browser `localStorage`. **Target:** Cart stores product IDs and quantities per authenticated user. Prefix: `/api/v1/cart`; every route requires a customer JWT. User identity is taken from the token, not the request body.
+**Implemented in** `cart-service/server.js`. Cart stores product IDs and quantities per authenticated user in PostgreSQL. Gateway path: `/api/cart` (for example `POST /api/cart/items`); every route requires a customer JWT. User identity is taken from the token, not the request body.
 
 | Method | Endpoint | Request | Success |
 |---|---|---|---|

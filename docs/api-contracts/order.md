@@ -1,6 +1,6 @@
-# Order API Contract (Target Demo)
+# Order API Contract
 
-**Current state:** `order-service/server.js` currently implements `GET /`, `POST /orders`, `GET /orders`, `GET /orders/:id`, and `GET /health`. Orders are in memory; create accepts one product and customer name/email. **Target:** Order owns persistent order records, snapshots, status, and checkout coordination. Prefix: `/api/v1/orders`.
+**Implemented in** `order-service/server.js`. Order owns persistent order records, snapshots, status, and checkout coordination. Service prefix: `/orders`; gateway path: `/api/order/orders` (for example `POST /api/order/orders/checkout`).
 
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
@@ -12,4 +12,4 @@ Checkout request: `{"items":[{"productId":1,"quantity":2}],"simulatePayment":"su
 
 Success `201`: `{"data":{"id":"order-1","status":"CONFIRMED","total":1999.98,"currency":"USD","items":[{"productId":1,"productName":"Laptop","unitPrice":999.99,"quantity":2}],"createdAt":"2026-01-01T12:00:00Z"}}`. Checkout may return `202` with `PENDING` if an idempotent retry is needed. Same user/key/same request returns the existing order; same key/different request returns `409 IDEMPOTENCY_KEY_REUSED`.
 
-Order re-reads Product prices, reserves through Inventory, invokes Mock Payment, then commits or releases inventory and stores the resulting status. List query: `page`, `pageSize`, optional `status`; response includes `data` and pagination `meta`. Validate nonempty lines, positive integer quantities, and bounded page size. Errors: `400 VALIDATION_ERROR`, `401`, `403`, `404 ORDER_NOT_FOUND`, `409 INSUFFICIENT_STOCK` / `IDEMPOTENCY_KEY_REUSED` / `ORDER_STATE_CONFLICT`, `503 DEPENDENCY_UNAVAILABLE`, `500 INTERNAL_ERROR`.
+Order re-reads Product prices, reserves through Inventory, invokes Mock Payment, then commits or releases inventory and stores the resulting status. List query: `page`, `pageSize`, optional `status`; response includes `data` and pagination `meta`. Validate nonempty lines, positive integer quantities, and bounded page size. Errors: `400 VALIDATION_ERROR`, `401`, `403`, `404 ORDER_NOT_FOUND`, `409 INSUFFICIENT_STOCK` / `IDEMPOTENCY_KEY_REUSED` / `ORDER_STATE_CONFLICT` / `PAYMENT_REJECTED` (Payment Service refused the request, e.g. unsupported currency; the order is marked `FAILED` and the reservation released), `503 DEPENDENCY_UNAVAILABLE`, `500 INTERNAL_ERROR`.

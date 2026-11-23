@@ -9,6 +9,13 @@ const PORT = Number(process.env.PORT) || 3003;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_TTL_SECONDS = 3600;
+// Comma-separated list of browser origins allowed to call this service.
+const CORS_ALLOWED_ORIGINS = new Set(
+  (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
+    .split(',')
+    .map(origin => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+);
 
 if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
 if (!JWT_SECRET || Buffer.byteLength(JWT_SECRET, 'utf8') < 32) {
@@ -19,12 +26,11 @@ const pool = new Pool({ connectionString: DATABASE_URL });
 
 app.disable('x-powered-by');
 app.use((req, res, next) => {
-  const allowedOrigin = 'http://localhost:3000';
   const origin = req.get('Origin');
 
   res.vary('Origin');
-  if (origin === allowedOrigin) {
-    res.set('Access-Control-Allow-Origin', allowedOrigin);
+  if (origin && CORS_ALLOWED_ORIGINS.has(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }

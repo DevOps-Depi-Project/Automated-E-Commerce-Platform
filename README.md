@@ -1,8 +1,8 @@
 # Automated E-Commerce Deployment Platform
 
-An automated DevOps platform built around a containerized e-commerce application. The project demonstrates a seven-service microservices application and provides a foundation for automating builds, deployments, infrastructure management, monitoring, scaling, and recovery using modern DevOps tools.
+An automated DevOps platform built around a containerized e-commerce application. The project demonstrates an eight-service microservices application (web, database, payment and search included) and provides a foundation for automating builds, deployments, infrastructure management, monitoring, scaling, and recovery using modern DevOps tools.
 
-> **Implementation status:** The current application includes seven business services and a Docker Compose environment. Kubernetes, Jenkins, Terraform, Ansible, AWS infrastructure, Prometheus, and Grafana are part of the broader project plan and should be marked complete only after they are implemented and tested. Payment currently uses a mock/simulation flow; no real card payments are processed.
+> **Implementation status:** The current application includes eight business services, an Nginx reverse proxy, and a Docker Compose environment. Kubernetes, Jenkins, Terraform, Ansible, AWS infrastructure, Prometheus, and Grafana are part of the broader project plan and should be marked complete only after they are implemented and tested. Payment currently uses a mock/simulation flow; no real card payments are processed.
 
 ---
 
@@ -33,15 +33,16 @@ The planned platform integrates containerization, continuous integration and con
 
 ### 3.1 E-Commerce Application
 
-The current application is organized into seven business services:
+The current application is organized into eight business services:
 
-1. **Frontend Service:** Provides the storefront interface and admin dashboard.
-2. **Authentication Service:** Handles user authentication and JWT-based authorization.
-3. **Product Service:** Manages the product catalog and product information.
+1. **Frontend Service:** Provides the storefront interface and admin dashboard. Its Nginx server is also the reverse proxy for all APIs.
+2. **Authentication Service:** Handles customer registration, login, and JWT-based authorization.
+3. **Product Service:** Manages the product catalog and product information (source of truth for prices).
 4. **Cart Service:** Manages shopping cart items and quantities.
 5. **Order Service:** Coordinates checkout and manages order processing.
 6. **Inventory Service:** Manages stock quantities and temporary stock reservations.
-7. **Payment Service:** Simulates the payment workflow for academic testing.
+7. **Payment Service:** Simulates the payment workflow for academic testing (internal only).
+8. **Search Service:** Product search with relevance ranking, prefix matching, typo tolerance, filters, and category facets. It keeps its own search index that is synchronised from Product Service.
 
 The application uses PostgreSQL as its database server, with separate schemas for service-level data ownership.
 
@@ -54,7 +55,7 @@ The broader proposed deployment platform includes:
 3. **Kubernetes:** Manages containers, service discovery, health checks, and scaling.
 4. **Ansible:** Automates server preparation and configuration.
 5. **Terraform:** Provisions cloud infrastructure on AWS.
-6. **Nginx:** Serves the frontend and routes incoming requests as configured.
+6. **Nginx:** Serves the frontend and acts as the reverse proxy that routes `/api/...` requests to the services (implemented).
 7. **Prometheus:** Collects metrics from the application and infrastructure.
 8. **Grafana:** Visualizes metrics through monitoring dashboards.
 9. **Amazon EC2:** Provides compute infrastructure.
@@ -62,56 +63,53 @@ The broader proposed deployment platform includes:
 11. **Amazon S3:** Stores static assets and other application files, if required.
 12. **AWS Elastic Load Balancing:** Distributes incoming traffic across application instances.
 
-These are planned platform components; their presence in this description does not by itself mean they have already been deployed.
+Apart from Docker and Nginx, these are planned platform components; their presence in this description does not by itself mean they have already been deployed.
 
 ### 3.3 Application Architecture Diagram
 
 ```text
-                         ┌──────────────────────┐
-                         │   Frontend (Nginx)   │
-                         │       Port 3000      │
-                         └──────────┬───────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-       ┌──────▼──────┐       ┌──────▼──────┐       ┌──────▼──────┐
-       │    Auth     │       │   Product   │       │    Cart     │
-       │    :3003    │       │    :3001    │       │    :3006    │
-       └─────────────┘       └─────────────┘       └─────────────┘
-              │                     │                     │
-              └─────────────────────┼─────────────────────┘
-                                    │
-                            ┌───────▼───────┐
-                            │     Order     │
-                            │     :3002     │
-                            └──────┬───┬────┘
-                                   │   │
-                         ┌─────────▼┐ ┌▼──────────┐
-                         │ Inventory│ │  Payment  │
-                         │   :3004  │ │   :3005   │
-                         └──────────┘ └───────────┘
+                          Browser
+                             │  http://localhost:3000  (the only published port)
+                             ▼
+   ┌────────────────────────────────────────────────────────┐
+   │ Frontend - Nginx                                       │
+   │   /              -> storefront and admin dashboard     │
+   │   /api/<service>/ -> reverse proxy to the service      │
+   └──┬─────────┬─────────┬─────────┬──────────┬─────────┬──┘
+      ▼         ▼         ▼         ▼          ▼         ▼
+    Auth     Product    Cart      Order    Inventory  Search
+    :3003    :3001      :3006     :3002    :3004      :3007
 
-                       ┌─────────────────────────┐
-                       │ PostgreSQL (internal)   │
-                       │ Separate schema/service │
-                       │        :5432            │
-                       └─────────────────────────┘
+   Service-to-service calls (Docker Compose network):
+     Cart    ──> Product     current name and price of cart items
+     Order   ──> Product     trusted prices at checkout
+     Order   ──> Inventory   reserve / commit / release stock
+     Order   ──> Payment     mock payment (:3005, internal only)
+     Search  ──> Product     copies the active catalog every 30 s
+
+   PostgreSQL :5432 (internal) - one schema per service:
+     auth, products, carts, orders, inventory, payments, search
 ```
 
-This is a logical application overview. Internal service-to-service communication takes place over the Docker Compose network. Not every service port needs to be exposed publicly.
+Authentication is called only by the browser; the other services verify its JWTs locally with the shared secret.
 
 ### 3.4 Services and Ports
 
-| Service | Port | Responsibility |
-|---|---:|---|
-| Frontend | 3000 | Storefront and admin interface |
-| Product Service | 3001 | Product catalog and product information |
-| Order Service | 3002 | Checkout orchestration and order lifecycle |
-| Authentication Service | 3003 | Authentication and JWT issuance |
-| Inventory Service | 3004 | Stock quantities and reservations |
-| Payment Service | 3005 | Mock/simulated payment processing |
-| Cart Service | 3006 | Shopping cart items and quantities |
-| PostgreSQL | 5432 | Persistent relational database; internal service |
+Only the frontend port is published to the host. Every API is reached through Nginx at `http://localhost:3000/api/<service>/...`; the other ports exist only inside the Compose network.
+
+| Service | Internal port | Gateway path | Responsibility |
+|---|---:|---|---|
+| Frontend (Nginx) | 80 → host **3000** | `/` | Storefront, admin interface, reverse proxy |
+| Product Service | 3001 | `/api/product/` | Product catalog and product information |
+| Order Service | 3002 | `/api/order/` | Checkout orchestration and order lifecycle |
+| Authentication Service | 3003 | `/api/auth/` | Registration, login, and JWT issuance |
+| Inventory Service | 3004 | `/api/inventory/` | Stock quantities and reservations |
+| Payment Service | 3005 | not routed | Mock/simulated payment processing; called only by Order |
+| Cart Service | 3006 | `/api/cart/` | Shopping cart items and quantities |
+| Search Service | 3007 | `/api/search/` | Product search, filters, and category facets |
+| PostgreSQL | 5432 | not routed | Persistent relational database |
+
+Nginx removes the `/api/<service>` prefix before forwarding, so `GET /api/search/search?q=laptop` reaches Search Service as `GET /search?q=laptop`. If a service is down, Nginx answers with a JSON `503 SERVICE_UNAVAILABLE` error.
 
 ## 4. Tools and Technologies
 
@@ -122,7 +120,7 @@ This is a logical application overview. Internal service-to-service communicatio
 | Docker Compose | Local multi-service environment | In use |
 | Node.js / Express | Backend services | In use |
 | HTML, CSS, JavaScript | Frontend application | In use |
-| Nginx | Frontend web server and request routing | In use |
+| Nginx | Frontend web server and reverse proxy (`/api/...` routing) | In use |
 | PostgreSQL | Relational database | In use |
 | JWT | Authentication and authorization | In use |
 | Mock Payment | Academic payment simulation | In use |
@@ -136,6 +134,23 @@ This is a logical application overview. Internal service-to-service communicatio
 | AWS ELB | Load balancing | Planned |
 | Prometheus | Metrics collection and alerting | Planned |
 | Grafana | Monitoring dashboards | Planned |
+
+### 4.1 Course Requirements Checklist
+
+The project brief asks for a multi-service platform (**web, database, payment, search**) and nine deliverables:
+
+| Requirement | Status |
+|---|---|
+| Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
+| 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
+| 2. CI/CD pipelines for updates | Planned (Jenkins) |
+| 3. Kubernetes deployment with auto-scaling | Planned |
+| 4. Ansible scripts for server/configuration setup | Planned |
+| 5. Prometheus dashboards for service monitoring | Planned |
+| 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
+| 7. Terraform scripts for AWS EC2, RDS, S3, ELB | Planned |
+| 8. Automated rollback strategies | Planned |
+| 9. Git repository for code and scripts | Done |
 
 ## 5. Team Members
 
@@ -246,6 +261,19 @@ The following are proposed project targets, not measured results. Actual results
 
 The checkout flow uses an idempotency key to help prevent duplicate order creation when a checkout request is retried. Payment is simulated and must not be used to collect or process real payment-card information.
 
+Demo limitations: the mock payment accepts **USD only** (an order in another currency fails with `PAYMENT_REJECTED` and its stock is released immediately), and under Docker Compose (`NODE_ENV=production`) payment simulation is disabled, so payments always use `PAYMENT_DEFAULT_RESULT`.
+
+### 9.1 How Product Search Works
+
+The storefront search box, category buttons, price filter, and sort menu all call Search Service (`/api/search/search`).
+
+- **Own data:** Search Service keeps a read-only copy of the active catalog in its own `search` schema. Product Service stays the source of truth and is never modified by Search.
+- **Synchronisation:** every `SEARCH_SYNC_INTERVAL_SECONDS` (default 30 s) Search reads Product Service's public `GET /products` API, adds or updates changed products, and removes deactivated ones. A product added or edited in the admin dashboard therefore appears in search within about 30 seconds (eventual consistency).
+- **Matching:** PostgreSQL full-text search with prefix matching (`lap` finds *Laptop*) and stemming (`headphone` finds *Headphones*), plus `pg_trgm` trigram similarity for typos (`labtop` finds *Laptop*). Results are ranked by relevance; name matches weigh more than category and description matches.
+- **Filters:** `category`, `minPrice`, `maxPrice`, `sort` (`relevance`, `name-asc`, `name-desc`, `price-asc`, `price-desc`) and pagination. `GET /search/categories` returns the categories with product counts, used to build the category buttons.
+- **Resilience:** if Product Service is down, Search keeps answering from its last snapshot. If Search Service is down, the storefront falls back to loading the catalog from Product Service and filtering it in the browser.
+- **Scaling:** Search is stateless apart from its index, so it can run several replicas; a PostgreSQL advisory lock makes sure only one replica applies a sync at a time.
+
 ## 10. Admin Dashboard
 
 The frontend includes an admin area:
@@ -260,7 +288,9 @@ Admin operations use authenticated admin authorization. The dashboard and relate
 - Viewing inventory quantities and adjusting stock.
 - Reviewing orders and order details.
 
-Use an account configured with the admin role. Do not put admin credentials or JWT secrets in source control.
+Customers can create their own accounts from the storefront, but admin accounts cannot be created from the UI. The admin account is created at startup from `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` (see 11.2); it is created only if that email does not exist yet, and an existing customer account is never promoted. Do not put admin credentials or JWT secrets in source control.
+
+A newly added product has no stock until a quantity is added in the Inventory section; until then the storefront shows it as out of stock.
 
 ## 11. Running the Application Locally
 
@@ -279,7 +309,16 @@ cd Automated-E-Commerce-Platform
 
 ### 11.2 Configure Environment Variables
 
-Review the `.env.example` files and `docker-compose.yml`. Create the required local `.env` files from the corresponding examples and configure values for your environment.
+Docker Compose reads only the root `.env` file. It is ignored by Git, so it does **not** come with a clone or a copy of the repository (for example when moving the project from WSL to Windows). Create it before the first run:
+
+```bash
+cp .env.example .env            # Linux / WSL / Git Bash
+Copy-Item .env.example .env     # Windows PowerShell
+```
+
+Then replace `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ characters) and `INTERNAL_SERVICE_TOKEN` (32+ characters). Without them `docker compose up` stops with `Set ... in .env`. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` (8–72 characters) if you want an admin account for `/admin`. Avoid `$` in values, because Compose treats it as variable interpolation.
+
+The per-service `.env.example` files are only for running a single service outside Docker.
 
 Configuration categories include:
 
@@ -305,7 +344,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Wait until services with health checks report healthy. The frontend may not display a health status if its Compose service does not define a health check.
+Wait until all nine containers (eight services plus PostgreSQL) report `(healthy)`; this usually takes about a minute. On a slow machine `docker compose up` may stop waiting before the last containers start (they stay `Created`); run `docker compose up -d` again to start them.
 
 ### 11.5 Open the Application
 
@@ -354,15 +393,28 @@ Only use `docker compose down -v` when you intentionally want to reset the local
 
 ## 13. API and Health Checks
 
-The backend services expose HTTP APIs on their respective container ports. Exact routes and request/response contracts are defined in each service's source code and in the API documentation under `docs/`.
+All public APIs are reached through the Nginx reverse proxy on port 3000. Exact routes and request/response contracts are defined in each service's source code and in the API documentation under `docs/api-contracts/`.
 
-Where a health endpoint is available, it can be used to check service readiness. For example:
+Every service has a `/health` endpoint:
 
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:3000/api/product/health
+curl http://localhost:3000/api/search/health      # also shows the search index sync status
 ```
 
-If a service port is not published to the host in `docker-compose.yml`, run the request from another container on the Compose network or inspect the service configuration.
+Search examples:
+
+```bash
+curl "http://localhost:3000/api/search/search?q=laptop"
+curl "http://localhost:3000/api/search/search?category=electronics&maxPrice=700&sort=price-desc"
+curl "http://localhost:3000/api/search/search/categories"
+```
+
+Backend ports are not published to the host. To call a service directly (for example Payment, which is not routed), run the request inside the Compose network:
+
+```bash
+docker compose exec order-service wget -qO- http://payment-service:3005/health
+```
 
 ## 14. Database Design
 
@@ -374,6 +426,7 @@ The project uses one PostgreSQL server with separate schemas for service-level d
 - Order Service owns orders and order snapshots.
 - Authentication Service owns authentication-related data.
 - Payment Service owns simulated payment records.
+- Search Service owns the `search` schema: a read-only search index copied from Product Service's public API.
 
 Services should access their own data through their own service logic rather than directly modifying another service's schema.
 
@@ -383,13 +436,14 @@ The repository is organized by service and supporting documentation. The exact s
 
 ```text
 Automated-E-Commerce-Platform/
-├── frontend/
-├── auth-service/
+├── frontend/                 # index.html + nginx.conf (reverse proxy)
+├── authentication-service/
 ├── product-service/
 ├── order-service/
 ├── cart-service/
 ├── inventory-service/
 ├── payment-service/
+├── search-service/
 ├── docs/
 │   ├── architecture/
 │   ├── api-contracts/
@@ -485,4 +539,4 @@ The outcomes should be marked as completed only after implementation and demonst
 
 ## 19. Conclusion
 
-The Automated E-Commerce Deployment Platform demonstrates how DevOps tools and practices can automate the software delivery lifecycle, improve application reliability, simplify infrastructure management, and support scalable deployments for modern e-commerce systems. The seven-service e-commerce application provides the application foundation, while the planned DevOps phases extend it into an automated deployment and operations platform.
+The Automated E-Commerce Deployment Platform demonstrates how DevOps tools and practices can automate the software delivery lifecycle, improve application reliability, simplify infrastructure management, and support scalable deployments for modern e-commerce systems. The eight-service e-commerce application provides the application foundation, while the planned DevOps phases extend it into an automated deployment and operations platform.
