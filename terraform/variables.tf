@@ -5,7 +5,7 @@ variable "project" {
 }
 
 variable "aws_region" {
-  description = "AWS region. eu-central-1 (Frankfurt) is close to Egypt; us-east-1 is slightly cheaper."
+  description = "AWS region. AWS Free plan accounts may only use the region chosen at sign-up (set it in terraform.tfvars)."
   type        = string
   default     = "eu-central-1"
 }

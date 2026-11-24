@@ -82,7 +82,7 @@
     - name: Stop the deploy and report the result
       ansible.builtin.fail:
         msg: >-
-          Version {{ image_tag }} failed its health checks.
+          Version {{ image_tag }} could not be deployed (image pull, container start or health checks failed).
           {{ ('Rolled back to ' ~ previous_release ~ ', which is running again.')
              if (auto_rollback | bool and previous_release | length > 0 and previous_release != image_tag)
              else 'No earlier version to roll back to.' }}
