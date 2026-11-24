@@ -1,0 +1,63 @@
+# Jenkins Configuration as Code. Applied on every start, so this file is the source of truth.
+# ${...} values come from environment variables; jenkins_admin_password and dockerhub_token
+# are Docker secrets mounted under /run/secrets (see jenkins/docker-compose.yml), so they
+# never appear in the environment of builds.
+jenkins:
+  systemMessage: "E-Commerce Platform CI (local). Configured as code in jenkins/casc/jenkins.yaml."
+  numExecutors: 1
+  mode: NORMAL
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${JENKINS_ADMIN_USER:-admin}"
+          password: "${jenkins_admin_password}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "dockerhub"
+              username: "${DOCKERHUB_USER}"
+              password: "${dockerhub_token}"
+              description: "Docker Hub access token used by the Jenkinsfile to push images"
+
+unclassified:
+  location:
+    url: "${JENKINS_URL:-http://localhost:8090/}"
+
+jobs:
+  - script: |
+      multibranchPipelineJob('ecommerce-platform') {
+        displayName('E-Commerce Platform')
+        description('Builds every branch with the Jenkinsfile: unit tests, image build, end-to-end test. Only main pushes images to Docker Hub.')
+        branchSources {
+          branchSource {
+            source {
+              git {
+                id('ecommerce-platform-git')
+                remote('${GIT_REPO_URL}')
+                traits {
+                  gitBranchDiscovery()
+                }
+              }
+            }
+          }
+        }
+        // GitHub cannot reach a laptop with a webhook, so Jenkins checks for new commits every 2 minutes.
+        triggers {
+          periodicFolderTrigger {
+            interval('2m')
+          }
+        }
+        orphanedItemStrategy {
+          discardOldItems {
+            numToKeep(5)
+          }
+        }
+      }

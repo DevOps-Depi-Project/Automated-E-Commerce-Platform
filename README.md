@@ -143,10 +143,10 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 |---|---|
 | Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
-| 2. CI/CD pipelines for updates | Planned (Jenkins) |
+| 2. CI/CD pipelines for updates | Done for CI: Jenkins builds, tests and publishes images (`Jenkinsfile`); automatic deployment is planned |
 | 3. Kubernetes deployment with auto-scaling | Planned |
 | 4. Ansible scripts for server/configuration setup | Planned |
-| 5. Prometheus dashboards for service monitoring | Planned |
+| 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
 | 7. Terraform scripts for AWS EC2, RDS, S3, ELB | Planned |
 | 8. Automated rollback strategies | Planned |
@@ -391,6 +391,26 @@ docker compose down -v
 
 Only use `docker compose down -v` when you intentionally want to reset the local database.
 
+### 12.1 Docker Hub Images
+
+Every service image is named `<DOCKERHUB_USER>/ecommerce-<service>:<IMAGE_TAG>`, for example `mosab2004/ecommerce-search-service:6f286d9`. Set `DOCKERHUB_USER` and `IMAGE_TAG` in `.env`. Each release is pushed twice: with the short Git commit ID (an immutable version that rollbacks can return to) and as `latest`.
+
+Run a published version without building anything (this is how servers deploy):
+
+```bash
+IMAGE_TAG=6f286d9 docker compose pull
+IMAGE_TAG=6f286d9 docker compose up -d --no-build
+```
+
+Build and publish a new version (requires `docker login` with push access to the account):
+
+```bash
+IMAGE_TAG=$(git rev-parse --short HEAD) docker compose build
+IMAGE_TAG=$(git rev-parse --short HEAD) docker compose push
+```
+
+The images contain no secrets: `.env` is excluded by each service's `.dockerignore`, and secrets are passed only as environment variables at runtime. Docker Hub repositories are public by default.
+
 ## 13. API and Health Checks
 
 All public APIs are reached through the Nginx reverse proxy on port 3000. Exact routes and request/response contracts are defined in each service's source code and in the API documentation under `docs/api-contracts/`.
@@ -416,7 +436,48 @@ Backend ports are not published to the host. To call a service directly (for exa
 docker compose exec order-service wget -qO- http://payment-service:3005/health
 ```
 
-## 14. Database Design
+### 13.1 Prometheus Metrics
+
+Every Node.js service exposes `GET /metrics` in Prometheus format (library `prom-client`, shared file `<service>/metrics.js`). The endpoint is internal: Nginx returns `404` for `/api/<service>/metrics`, and Prometheus will scrape `<service>:<port>/metrics` inside the network.
+
+| Metric | Meaning |
+|---|---|
+| `http_requests_total{method,route,status_code}` | Requests per route pattern (for example `/products/:id`) and status |
+| `http_request_duration_seconds{method,route,status_code}` | Latency histogram (for p95/p99 and SLOs) |
+| `process_*`, `nodejs_*` | CPU, memory, event loop lag, GC (default Node.js metrics) |
+| `orders_checkout_requests_total{outcome}` | Checkouts by outcome: `CONFIRMED`, `PENDING`, `REPLAYED`, or an error code such as `INSUFFICIENT_STOCK` |
+| `orders_confirmed_total{currency}`, `orders_confirmed_amount_total{currency}` | Confirmed orders and revenue |
+| `search_queries_total{type,result}` | Searches (`text` or `browse`) and whether they matched anything |
+| `search_index_products`, `search_index_last_success_timestamp_seconds`, `search_sync_runs_total{result}` | Search index size and sync health |
+
+Every series has a `service` label. To look at the raw output locally:
+
+```bash
+docker compose exec search-service wget -qO- http://127.0.0.1:3007/metrics | head -40
+```
+
+## 14. Testing
+
+Tests use Node.js's built-in test runner (`node --test`), so no extra test libraries are needed. Node.js 22.9 or newer is required on the machine that runs them.
+
+**Unit tests** (one `test/server.test.js` per service) start each service's Express app on a random local port without a database. They cover input validation, authentication and authorization, idempotency hashing, money rounding, search query safety, the database-down path (`503`), and `/metrics`.
+
+```bash
+npm run test:unit                      # all services (runs "npm ci" first where node_modules is missing)
+npm run test:unit -- search-service    # one service
+cd search-service && npm test          # same, from inside a service
+```
+
+**End-to-end smoke test** (`tests/e2e/smoke.test.js`) runs against the running stack through Nginx. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` (read from `.env`). It creates its own product and stock as the admin, registers a customer, waits for the product to appear in search, adds it to the cart, checks out, verifies the stock change and idempotent retry, checks that overselling is refused and internal endpoints are hidden, and finally deactivates the test product.
+
+```bash
+docker compose up -d --wait
+npm run test:e2e
+```
+
+Both commands exit with a non-zero code on failure, which is what the CI pipeline uses to stop a bad build. Test files are excluded from the Docker images (`.dockerignore`).
+
+## 15. Database Design
 
 The project uses one PostgreSQL server with separate schemas for service-level data ownership. This keeps the database infrastructure simple for the demo while maintaining logical separation between services.
 
@@ -430,7 +491,7 @@ The project uses one PostgreSQL server with separate schemas for service-level d
 
 Services should access their own data through their own service logic rather than directly modifying another service's schema.
 
-## 15. Project Files and Repository Structure
+## 16. Project Files and Repository Structure
 
 The repository is organized by service and supporting documentation. The exact structure may evolve as implementation progresses.
 
@@ -449,10 +510,16 @@ Automated-E-Commerce-Platform/
 │   ├── api-contracts/
 │   ├── implementation-roadmap.md
 │   └── original-project-proposal.md
+├── tests/
+│   ├── e2e/smoke.test.js     # end-to-end test against the running stack
+│   └── run-unit-tests.js     # runs every service's unit tests
 ├── docker-compose.yml
+├── package.json              # npm run test:unit / test:e2e
 ├── .gitignore
 └── README.md
 ```
+
+Each service folder contains `server.js`, `metrics.js`, `migrate.js` with `migrations/`, `test/`, `Dockerfile`, `.dockerignore`, `package.json` with `package-lock.json` (images are built with `npm ci`), and `.env.example`.
 
 The proposed future DevOps structure may include:
 
@@ -490,7 +557,41 @@ These future directories should be added as the corresponding components are imp
 - [API contracts](docs/api-contracts/)
 - [Implementation roadmap](docs/implementation-roadmap.md)
 
-## 16. CI/CD and Deployment Roadmap
+## 17. CI/CD with Jenkins
+
+The pipeline is defined in the root [`Jenkinsfile`](Jenkinsfile) and runs on a local Jenkins that is itself configured as code in [`jenkins/`](jenkins/).
+
+```text
+every branch:  Prepare -> Unit tests -> Build images -> End-to-end test
+main only:                                                 -> Push to Docker Hub
+```
+
+- **Prepare:** the image tag is the short commit ID; `tests/write-ci-env.js` generates random throwaway secrets for the test stack.
+- **Unit tests:** `npm run test:unit` for all services.
+- **Build images:** `docker compose build`, two images at a time.
+- **End-to-end test:** starts the stack as a separate Compose project (`ecommerce-ci`, port 3080, its own database volume), runs `npm run test:e2e`, prints container logs if it fails, and always deletes the stack and its volume.
+- **Push to Docker Hub:** only on `main`, and only if every earlier stage passed. Each image is pushed as `<commit>` (immutable, used for rollback) and `latest`.
+
+### 17.1 Running Jenkins Locally
+
+Jenkins runs in Docker and drives the host's Docker engine through the mounted Docker socket. Plugins, the admin user, the Docker Hub credential and the `ecommerce-platform` multibranch job are created automatically from [`jenkins/casc/jenkins.yaml`](jenkins/casc/jenkins.yaml) (Configuration as Code); there is no setup wizard.
+
+1. Create a Docker Hub personal access token with **Read & Write** scope (hub.docker.com → Account settings → Personal access tokens).
+2. Create `jenkins/.env` from [`jenkins/.env.example`](jenkins/.env.example) and fill in the Jenkins admin password, Docker Hub user and token. The file is ignored by Git.
+3. Start Jenkins (stop the application stack first if memory is limited; Jenkins needs about 1 GB):
+
+   ```bash
+   cd jenkins
+   docker compose up -d --build
+   ```
+
+4. Open [http://localhost:8090](http://localhost:8090) (or the `JENKINS_PORT` you set) and sign in with `JENKINS_ADMIN_USER` / `JENKINS_ADMIN_PASSWORD`.
+
+The job scans the GitHub repository every 2 minutes and builds any branch that has new commits (GitHub cannot send webhooks to a laptop). To build immediately, open the job and click **Scan Multibranch Pipeline Now**, or **Build Now** on a branch.
+
+The admin password and the Docker Hub token are passed as Docker secrets (files in `/run/secrets`), not environment variables, so builds cannot print them. On Linux, set `DOCKER_SOCKET_GID` in `jenkins/.env` to the group id of `/var/run/docker.sock`.
+
+### 17.2 Deployment Roadmap
 
 The project proposal includes a broader DevOps direction:
 
@@ -507,7 +608,7 @@ The project proposal includes a broader DevOps direction:
 
 These steps are roadmap items until the related pipeline, manifests, infrastructure code, and monitoring configuration are present and tested in the repository.
 
-## 17. Security Considerations
+## 18. Security Considerations
 
 - Never commit AWS credentials, API keys, passwords, or production secrets.
 - Use environment variables and an appropriate secrets-management mechanism.
@@ -521,7 +622,7 @@ These steps are roadmap items until the related pipeline, manifests, infrastruct
 
 This is a learning and demonstration project, not a production-hardened commerce platform. A production deployment requires additional security review, backups, rate limiting, monitoring, and a real payment-provider integration.
 
-## 18. Expected Outcomes
+## 19. Expected Outcomes
 
 The expected project outcomes are:
 
@@ -537,6 +638,6 @@ The expected project outcomes are:
 
 The outcomes should be marked as completed only after implementation and demonstration.
 
-## 19. Conclusion
+## 20. Conclusion
 
 The Automated E-Commerce Deployment Platform demonstrates how DevOps tools and practices can automate the software delivery lifecycle, improve application reliability, simplify infrastructure management, and support scalable deployments for modern e-commerce systems. The eight-service e-commerce application provides the application foundation, while the planned DevOps phases extend it into an automated deployment and operations platform.

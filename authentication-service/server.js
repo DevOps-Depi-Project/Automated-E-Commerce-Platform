@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { setupMetrics } = require('./metrics');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3003;
@@ -25,6 +26,7 @@ if (!JWT_SECRET || Buffer.byteLength(JWT_SECRET, 'utf8') < 32) {
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 app.disable('x-powered-by');
+const metrics = setupMetrics(app, 'authentication-service');
 app.use((req, res, next) => {
   const origin = req.get('Origin');
 
@@ -225,16 +227,24 @@ app.use((error, req, res, next) => {
   return errorResponse(res, 500, 'INTERNAL_ERROR', 'An unexpected error occurred');
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Authentication service running on port ${PORT}`);
-});
-
-async function close() {
-  server.close(async () => {
-    await pool.end();
-    process.exit(0);
+function start() {
+  const server = app.listen(PORT, () => {
+    console.log(`Authentication service running on port ${PORT}`);
   });
+
+  function close() {
+    server.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', close);
+  process.on('SIGTERM', close);
+  return server;
 }
 
-process.on('SIGINT', close);
-process.on('SIGTERM', close);
+// Start only when run directly (node server.js); tests import the app without listening.
+if (require.main === module) start();
+
+module.exports = { app, pool, metrics, validateRegistration, validateEmail, validatePassword, normalizeEmail, CORS_ALLOWED_ORIGINS };
