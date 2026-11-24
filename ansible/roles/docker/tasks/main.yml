@@ -92,3 +92,9 @@
     content: "vm.swappiness=10\n"
     mode: "0644"
   notify: Apply sysctl
+
+# Handlers normally run at the end of the play, i.e. after the app role has started the
+# stack, so a Docker restart (new daemon.json on a fresh server) would restart every
+# container right after the deploy was verified. Apply pending changes now instead.
+- name: Apply Docker and kernel settings before deploying the application
+  ansible.builtin.meta: flush_handlers

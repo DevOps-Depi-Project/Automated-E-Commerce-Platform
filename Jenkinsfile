@@ -119,7 +119,13 @@ pipeline {
           set -eu
           host=$(grep -o 'ansible_host=[0-9.]*' "$DEPLOY_INVENTORY" | cut -d= -f2)
           for path in / /api/search/health /api/order/health; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$host$path")
+            # A few short retries absorb a container that is still settling after a restart.
+            code=000
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$host$path" || true)
+              [ "$code" = 200 ] && break
+              sleep 5
+            done
             echo "http://$host$path -> $code"
             test "$code" = 200
           done
