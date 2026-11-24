@@ -143,7 +143,7 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 |---|---|
 | Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
-| 2. CI/CD pipelines for updates | Done for CI: Jenkins builds, tests and publishes images (`Jenkinsfile`); automatic deployment is planned |
+| 2. CI/CD pipelines for updates | Done: Jenkins tests, builds and publishes images, then deploys `main` to AWS with Ansible (`Jenkinsfile`) |
 | 3. Kubernetes deployment with auto-scaling | Planned |
 | 4. Ansible scripts for server/configuration setup | Done: `ansible/` installs Docker and deploys the stack on EC2 |
 | 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
@@ -563,7 +563,7 @@ The pipeline is defined in the root [`Jenkinsfile`](Jenkinsfile) and runs on a l
 
 ```text
 every branch:  Prepare -> Unit tests -> Build images -> End-to-end test
-main only:                                                 -> Push to Docker Hub
+main only:                                                 -> Push to Docker Hub -> Deploy to AWS
 ```
 
 - **Prepare:** the image tag is the short commit ID; `tests/write-ci-env.js` generates random throwaway secrets for the test stack.
@@ -571,6 +571,7 @@ main only:                                                 -> Push to Docker Hub
 - **Build images:** `docker compose build`, two images at a time.
 - **End-to-end test:** starts the stack as a separate Compose project (`ecommerce-ci`, port 3080, its own database volume), runs `npm run test:e2e`, prints container logs if it fails, and always deletes the stack and its volume.
 - **Push to Docker Hub:** only on `main`, and only if every earlier stage passed. Each image is pushed as `<commit>` (immutable, used for rollback) and `latest`.
+- **Deploy to AWS:** only on `main`, and only while a server exists (Terraform writes `ansible/inventory/hosts.ini` on `apply` and removes it on `destroy`; Jenkins sees it read-only). Jenkins runs `ansible/site.yml` with the new tag, which rolls back automatically if the new version fails, and then checks the site from outside. Without a server the stage is skipped, not failed.
 
 ### 17.1 Running Jenkins Locally
 
@@ -589,7 +590,7 @@ Jenkins runs in Docker and drives the host's Docker engine through the mounted D
 
 The job scans the GitHub repository every 2 minutes and builds any branch that has new commits (GitHub cannot send webhooks to a laptop). To build immediately, open the job and click **Scan Multibranch Pipeline Now**, or **Build Now** on a branch.
 
-The admin password and the Docker Hub token are passed as Docker secrets (files in `/run/secrets`), not environment variables, so builds cannot print them. On Linux, set `DOCKER_SOCKET_GID` in `jenkins/.env` to the group id of `/var/run/docker.sock`.
+The admin password, the Docker Hub token and the server SSH key (`~/.ssh/depi-ecommerce`, credential `deploy-ssh`) are passed as Docker secrets (files in `/run/secrets`), not environment variables, so builds cannot print them. Jenkins reads the SSH key through group 0, so make it group-readable once after creating it: `docker compose -f infra/docker-compose.yml run --rm --entrypoint sh infra -c "chmod 0640 /keys/depi-ecommerce"`. Jenkins must run on the machine whose public IP may SSH to the server (Terraform allows only that IP). On Linux, set `DOCKER_SOCKET_GID` in `jenkins/.env` to the group id of `/var/run/docker.sock`.
 
 ### 17.2 Deploying to AWS (Terraform + Ansible)
 

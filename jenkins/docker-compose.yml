@@ -23,6 +23,7 @@ services:
     secrets:
       - jenkins_admin_password
       - dockerhub_token
+      - deploy_ssh_key
     # Jenkins drives the host's Docker engine (docker-outside-of-docker). The socket belongs
     # to group 0 on Docker Desktop; on Linux set DOCKER_SOCKET_GID to its group id
     # (stat -c %g /var/run/docker.sock).
@@ -31,6 +32,9 @@ services:
     volumes:
       - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
+      # Read-only view of the Ansible inventory that "terraform apply" writes and
+      # "terraform destroy" removes: the pipeline deploys only while a server exists.
+      - ../ansible/inventory:/deploy-inventory:ro
     # Lets the pipeline reach the test stack's published port on the host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -40,6 +44,11 @@ secrets:
     environment: JENKINS_ADMIN_PASSWORD
   dockerhub_token:
     environment: DOCKERHUB_TOKEN
+  # Private key Terraform installs on the server (created with ssh-keygen, see README 17.2).
+  # Jenkins runs as uid 1000 in group 0, so the file must be group-readable inside
+  # containers (one time: ... run --rm --entrypoint sh infra -c "chmod 0640 /keys/depi-ecommerce").
+  deploy_ssh_key:
+    file: ${DEPLOY_SSH_KEY_FILE:-${USERPROFILE:-${HOME}}/.ssh/depi-ecommerce}
 
 volumes:
   jenkins_home:

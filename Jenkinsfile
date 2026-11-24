@@ -1,9 +1,11 @@
 // CI pipeline for the e-commerce platform (see README "CI/CD with Jenkins").
 //
 // Every branch:  unit tests -> build images -> end-to-end test on a throwaway stack
-// main only:     push the tested images to Docker Hub as <short commit> and latest
+// main only:     push the tested images to Docker Hub as <short commit> and latest,
+//                then deploy them to the AWS server (when one exists) with Ansible
 //
-// A failing stage stops the pipeline, so untested images are never published.
+// A failing stage stops the pipeline, so untested images are never published or deployed.
+// A deploy that fails its health checks is rolled back to the previous version by Ansible.
 pipeline {
   agent any
 
@@ -23,6 +25,8 @@ pipeline {
     // Build two images at a time to keep memory use low on small machines.
     COMPOSE_PARALLEL_LIMIT = '2'
     COMPOSE = 'docker compose --env-file ci.env'
+    // Written by "terraform apply" and removed by "terraform destroy" (mounted read-only).
+    DEPLOY_INVENTORY = '/deploy-inventory/hosts.ini'
   }
 
   stages {
@@ -87,6 +91,41 @@ pipeline {
               docker push "${image%:*}:latest"
             done
           '''
+        }
+      }
+    }
+
+    stage('Deploy to AWS') {
+      when {
+        allOf {
+          branch 'main'
+          // Only while a server exists; otherwise the stage is skipped, not failed.
+          expression { sh(script: 'test -s "$DEPLOY_INVENTORY"', returnStatus: true) == 0 }
+        }
+      }
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: 'deploy-ssh', keyFileVariable: 'DEPLOY_KEY')]) {
+          // site.yml is idempotent: it installs Docker on a new server and is quick on a
+          // prepared one. Ansible rolls back automatically if the new version fails.
+          sh '''
+            set -eu
+            cd ansible
+            export ANSIBLE_SSH_ARGS="-o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$WORKSPACE/.deploy_known_hosts"
+            ansible-playbook site.yml -i "$DEPLOY_INVENTORY" --private-key "$DEPLOY_KEY" -e image_tag="$IMAGE_TAG"
+          '''
+        }
+        // Check from outside, like a visitor (also proves the firewall allows HTTP).
+        sh '''
+          set -eu
+          host=$(grep -o 'ansible_host=[0-9.]*' "$DEPLOY_INVENTORY" | cut -d= -f2)
+          for path in / /api/search/health /api/order/health; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$host$path")
+            echo "http://$host$path -> $code"
+            test "$code" = 200
+          done
+        '''
+        script {
+          currentBuild.description = "deployed ${env.IMAGE_TAG} to AWS"
         }
       }
     }
