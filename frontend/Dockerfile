@@ -1,11 +1,16 @@
-FROM nginx:alpine
+FROM nginx:1.27-alpine
 
-# Copy the HTML file to nginx html directory
+# Storefront and admin dashboard (single static page).
 COPY index.html /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port 80
+# Reverse-proxy configuration as a template. At start-up the official nginx entrypoint
+# replaces ${NGINX_RESOLVER} and ${API_DOMAIN_SUFFIX} and writes conf.d/default.conf.
+# The defaults suit Docker Compose; Kubernetes overrides both (see kubernetes/).
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+ENV NGINX_RESOLVER=127.0.0.11 \
+    API_DOMAIN_SUFFIX="" \
+    NGINX_ENVSUBST_FILTER="^(NGINX_RESOLVER|API_DOMAIN_SUFFIX)$"
+
 EXPOSE 80
 
-# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

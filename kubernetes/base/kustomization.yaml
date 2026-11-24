@@ -1,0 +1,21 @@
+# Base of the Kubernetes deployment. Overlays (../overlays/*) add the Secret, pick the
+# image version and adjust settings per environment:
+#   kubectl apply -k kubernetes/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ecommerce
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - authentication-service.yaml
+  - product-service.yaml
+  - cart-service.yaml
+  - inventory-service.yaml
+  - order-service.yaml
+  - payment-service.yaml
+  - search-service.yaml
+  - frontend.yaml
+  - hpa.yaml
