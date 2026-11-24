@@ -96,6 +96,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL:-http://product-service:3001}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-5000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,6 +149,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
       PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL:-http://product-service:3001}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-5000}
       INVENTORY_SERVICE_URL: ${INVENTORY_SERVICE_URL:-http://inventory-service:3004}
       PAYMENT_SERVICE_URL: ${PAYMENT_SERVICE_URL:-http://payment-service:3005/internal/payments}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
@@ -207,6 +209,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ecommerce}
       PRODUCT_SERVICE_URL: ${PRODUCT_SERVICE_URL:-http://product-service:3001}
+      REQUEST_TIMEOUT_MS: ${REQUEST_TIMEOUT_MS:-5000}
       SEARCH_SYNC_INTERVAL_SECONDS: ${SEARCH_SYNC_INTERVAL_SECONDS:-30}
     depends_on:
       postgres:

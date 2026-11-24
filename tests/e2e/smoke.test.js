@@ -161,16 +161,34 @@ test('the customer adds the product to the cart', async () => {
   assert.equal(line.currentPrice, 12.34);
 });
 
+// The API contract: on 503 DEPENDENCY_UNAVAILABLE or 202 PENDING, retry with the SAME
+// Idempotency-Key and the order resumes where it stopped (no second reservation or payment).
+// This is what the storefront does, and it makes the test robust on a slow CI machine.
+async function checkoutUntilFinal(key, body, maxAttempts = 4) {
+  const attempts = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await api('/api/order/orders/checkout', {
+      method: 'POST',
+      token: state.customerToken,
+      headers: { 'Idempotency-Key': key },
+      body
+    });
+    const code = response.json && response.json.error && response.json.error.code;
+    attempts.push(`${response.status}${code ? ` ${code}` : ''}`);
+    const retryable = response.status === 202 || (response.status === 503 && code === 'DEPENDENCY_UNAVAILABLE');
+    if (!retryable) return { response, attempts };
+    await sleep(2000 * attempt);
+  }
+  assert.fail(`checkout did not finish after ${maxAttempts} attempts: ${attempts.join(', ')}`);
+}
+
 test('checkout confirms the order, takes stock, and is idempotent', async () => {
   const key = `e2e-${runId}`;
   const body = { items: [{ productId: state.productId, quantity: 2 }] };
-  const first = await api('/api/order/orders/checkout', {
-    method: 'POST',
-    token: state.customerToken,
-    headers: { 'Idempotency-Key': key },
-    body
-  });
-  assert.equal(first.status, 201, first.text);
+  const { response: first, attempts } = await checkoutUntilFinal(key, body);
+  if (attempts.length > 1) console.log(`checkout needed ${attempts.length} attempts: ${attempts.join(', ')}`);
+  // 201 when the first attempt finished the order, 200 when a retry resumed it.
+  assert.ok([200, 201].includes(first.status), first.text);
   assert.equal(first.json.data.status, 'CONFIRMED');
   assert.equal(first.json.data.total, 24.68); // the server computes the total
   state.orderId = first.json.data.id;
