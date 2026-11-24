@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { setupMetrics } = require('./metrics');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3002;
@@ -29,6 +30,22 @@ if (!INTERNAL_SERVICE_TOKEN || Buffer.byteLength(INTERNAL_SERVICE_TOKEN, 'utf8')
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 app.disable('x-powered-by');
+const metrics = setupMetrics(app, 'order-service');
+const checkoutRequests = metrics.counter({
+  name: 'orders_checkout_requests_total',
+  help: 'Checkout requests by outcome (CONFIRMED, PENDING, CANCELLED, REPLAYED or an error code)',
+  labelNames: ['outcome']
+});
+const ordersConfirmed = metrics.counter({
+  name: 'orders_confirmed_total',
+  help: 'Orders that reached CONFIRMED',
+  labelNames: ['currency']
+});
+const revenueConfirmed = metrics.counter({
+  name: 'orders_confirmed_amount_total',
+  help: 'Sum of confirmed order totals',
+  labelNames: ['currency']
+});
 app.use(cors());
 app.use(express.json({ limit: '10kb' }));
 
@@ -541,6 +558,8 @@ async function processPendingOrder(orderId, simulatePayment) {
   }
 
   await updateOrder(order.id, { status: 'CONFIRMED', failure_reason: null });
+  ordersConfirmed.inc({ currency: order.currency });
+  revenueConfirmed.inc({ currency: order.currency }, order.total);
   return loadOrder(order.id);
 }
 
@@ -585,11 +604,16 @@ app.get('/', (req, res) => {
 });
 
 app.post('/orders/checkout', authenticate, async (req, res, next) => {
+  // Each return path below sets res.locals.checkoutOutcome; error paths use the error code.
+  res.on('finish', () => {
+    checkoutRequests.inc({ outcome: res.locals.checkoutOutcome || `HTTP_${res.statusCode}` });
+  });
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
     ? req.body
     : {};
   const request = validateCheckout(body, req.get('Idempotency-Key'));
   if (request.details.length) {
+    res.locals.checkoutOutcome = 'VALIDATION_ERROR';
     return errorResponse(res, 400, 'VALIDATION_ERROR', 'Request validation failed', request.details);
   }
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.user.id)) {
@@ -613,6 +637,7 @@ app.post('/orders/checkout', authenticate, async (req, res, next) => {
       const storedFailure = getStoredFailure(order);
       if (storedFailure) throw storedFailure;
       if (order.status !== 'PENDING') {
+        res.locals.checkoutOutcome = 'REPLAYED';
         return res.status(200).json({ data: toOrderData(order) });
       }
     } else {
@@ -625,12 +650,14 @@ app.post('/orders/checkout', authenticate, async (req, res, next) => {
         const storedFailure = getStoredFailure(order);
         if (storedFailure) throw storedFailure;
         if (order.status !== 'PENDING') {
+          res.locals.checkoutOutcome = 'REPLAYED';
           return res.status(200).json({ data: toOrderData(order) });
         }
       }
     }
 
     order = await processPendingOrder(order.id, request.simulatePayment);
+    res.locals.checkoutOutcome = order.status;
     if (order.status === 'PENDING') {
       return res.status(202).json({ data: toOrderData(order) });
     }
@@ -641,6 +668,7 @@ app.post('/orders/checkout', authenticate, async (req, res, next) => {
     }
     return res.status(created ? 201 : 200).json({ data: toOrderData(order) });
   } catch (error) {
+    res.locals.checkoutOutcome = error.code && /^[A-Z_]+$/.test(error.code) ? error.code : 'INTERNAL_ERROR';
     return next(error);
   }
 });
@@ -740,19 +768,27 @@ app.use((error, req, res, next) => {
   return errorResponse(res, 500, 'INTERNAL_ERROR', 'An unexpected error occurred');
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Order service running on port ${PORT}`);
-  console.log(`Product service URL: ${PRODUCT_SERVICE_URL}`);
-  console.log(`Inventory service URL: ${INVENTORY_SERVICE_URL}`);
-  console.log(`Payment service URL: ${PAYMENT_SERVICE_URL}`);
-});
-
-async function close() {
-  server.close(async () => {
-    await pool.end();
-    process.exit(0);
+function start() {
+  const server = app.listen(PORT, () => {
+    console.log(`Order service running on port ${PORT}`);
+    console.log(`Product service URL: ${PRODUCT_SERVICE_URL}`);
+    console.log(`Inventory service URL: ${INVENTORY_SERVICE_URL}`);
+    console.log(`Payment service URL: ${PAYMENT_SERVICE_URL}`);
   });
+
+  function close() {
+    server.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', close);
+  process.on('SIGTERM', close);
+  return server;
 }
 
-process.on('SIGINT', close);
-process.on('SIGTERM', close);
+// Start only when run directly (node server.js); tests import the app without listening.
+if (require.main === module) start();
+
+module.exports = { app, pool, metrics, validateCheckout, priceToMinorUnits };

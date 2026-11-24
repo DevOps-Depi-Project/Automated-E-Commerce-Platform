@@ -146,7 +146,7 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 | 2. CI/CD pipelines for updates | Planned (Jenkins) |
 | 3. Kubernetes deployment with auto-scaling | Planned |
 | 4. Ansible scripts for server/configuration setup | Planned |
-| 5. Prometheus dashboards for service monitoring | Planned |
+| 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
 | 7. Terraform scripts for AWS EC2, RDS, S3, ELB | Planned |
 | 8. Automated rollback strategies | Planned |
@@ -436,7 +436,48 @@ Backend ports are not published to the host. To call a service directly (for exa
 docker compose exec order-service wget -qO- http://payment-service:3005/health
 ```
 
-## 14. Database Design
+### 13.1 Prometheus Metrics
+
+Every Node.js service exposes `GET /metrics` in Prometheus format (library `prom-client`, shared file `<service>/metrics.js`). The endpoint is internal: Nginx returns `404` for `/api/<service>/metrics`, and Prometheus will scrape `<service>:<port>/metrics` inside the network.
+
+| Metric | Meaning |
+|---|---|
+| `http_requests_total{method,route,status_code}` | Requests per route pattern (for example `/products/:id`) and status |
+| `http_request_duration_seconds{method,route,status_code}` | Latency histogram (for p95/p99 and SLOs) |
+| `process_*`, `nodejs_*` | CPU, memory, event loop lag, GC (default Node.js metrics) |
+| `orders_checkout_requests_total{outcome}` | Checkouts by outcome: `CONFIRMED`, `PENDING`, `REPLAYED`, or an error code such as `INSUFFICIENT_STOCK` |
+| `orders_confirmed_total{currency}`, `orders_confirmed_amount_total{currency}` | Confirmed orders and revenue |
+| `search_queries_total{type,result}` | Searches (`text` or `browse`) and whether they matched anything |
+| `search_index_products`, `search_index_last_success_timestamp_seconds`, `search_sync_runs_total{result}` | Search index size and sync health |
+
+Every series has a `service` label. To look at the raw output locally:
+
+```bash
+docker compose exec search-service wget -qO- http://127.0.0.1:3007/metrics | head -40
+```
+
+## 14. Testing
+
+Tests use Node.js's built-in test runner (`node --test`), so no extra test libraries are needed. Node.js 22.9 or newer is required on the machine that runs them.
+
+**Unit tests** (one `test/server.test.js` per service) start each service's Express app on a random local port without a database. They cover input validation, authentication and authorization, idempotency hashing, money rounding, search query safety, the database-down path (`503`), and `/metrics`.
+
+```bash
+npm run test:unit                      # all services (runs "npm ci" first where node_modules is missing)
+npm run test:unit -- search-service    # one service
+cd search-service && npm test          # same, from inside a service
+```
+
+**End-to-end smoke test** (`tests/e2e/smoke.test.js`) runs against the running stack through Nginx. It needs `ADMIN_EMAIL` and `ADMIN_PASSWORD` (read from `.env`). It creates its own product and stock as the admin, registers a customer, waits for the product to appear in search, adds it to the cart, checks out, verifies the stock change and idempotent retry, checks that overselling is refused and internal endpoints are hidden, and finally deactivates the test product.
+
+```bash
+docker compose up -d --wait
+npm run test:e2e
+```
+
+Both commands exit with a non-zero code on failure, which is what the CI pipeline uses to stop a bad build. Test files are excluded from the Docker images (`.dockerignore`).
+
+## 15. Database Design
 
 The project uses one PostgreSQL server with separate schemas for service-level data ownership. This keeps the database infrastructure simple for the demo while maintaining logical separation between services.
 
@@ -450,7 +491,7 @@ The project uses one PostgreSQL server with separate schemas for service-level d
 
 Services should access their own data through their own service logic rather than directly modifying another service's schema.
 
-## 15. Project Files and Repository Structure
+## 16. Project Files and Repository Structure
 
 The repository is organized by service and supporting documentation. The exact structure may evolve as implementation progresses.
 
@@ -469,10 +510,16 @@ Automated-E-Commerce-Platform/
 │   ├── api-contracts/
 │   ├── implementation-roadmap.md
 │   └── original-project-proposal.md
+├── tests/
+│   ├── e2e/smoke.test.js     # end-to-end test against the running stack
+│   └── run-unit-tests.js     # runs every service's unit tests
 ├── docker-compose.yml
+├── package.json              # npm run test:unit / test:e2e
 ├── .gitignore
 └── README.md
 ```
+
+Each service folder contains `server.js`, `metrics.js`, `migrate.js` with `migrations/`, `test/`, `Dockerfile`, `.dockerignore`, `package.json` with `package-lock.json` (images are built with `npm ci`), and `.env.example`.
 
 The proposed future DevOps structure may include:
 
@@ -510,7 +557,7 @@ These future directories should be added as the corresponding components are imp
 - [API contracts](docs/api-contracts/)
 - [Implementation roadmap](docs/implementation-roadmap.md)
 
-## 16. CI/CD and Deployment Roadmap
+## 17. CI/CD and Deployment Roadmap
 
 The project proposal includes a broader DevOps direction:
 
@@ -527,7 +574,7 @@ The project proposal includes a broader DevOps direction:
 
 These steps are roadmap items until the related pipeline, manifests, infrastructure code, and monitoring configuration are present and tested in the repository.
 
-## 17. Security Considerations
+## 18. Security Considerations
 
 - Never commit AWS credentials, API keys, passwords, or production secrets.
 - Use environment variables and an appropriate secrets-management mechanism.
@@ -541,7 +588,7 @@ These steps are roadmap items until the related pipeline, manifests, infrastruct
 
 This is a learning and demonstration project, not a production-hardened commerce platform. A production deployment requires additional security review, backups, rate limiting, monitoring, and a real payment-provider integration.
 
-## 18. Expected Outcomes
+## 19. Expected Outcomes
 
 The expected project outcomes are:
 
@@ -557,6 +604,6 @@ The expected project outcomes are:
 
 The outcomes should be marked as completed only after implementation and demonstration.
 
-## 19. Conclusion
+## 20. Conclusion
 
 The Automated E-Commerce Deployment Platform demonstrates how DevOps tools and practices can automate the software delivery lifecycle, improve application reliability, simplify infrastructure management, and support scalable deployments for modern e-commerce systems. The eight-service e-commerce application provides the application foundation, while the planned DevOps phases extend it into an automated deployment and operations platform.

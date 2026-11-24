@@ -1,0 +1,15 @@
+{
+  "name": "automated-e-commerce-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test runners for the e-commerce microservices (each service has its own package.json)",
+  "scripts": {
+    "test": "npm run test:unit",
+    "test:unit": "node tests/run-unit-tests.js",
+    "test:e2e": "node --env-file-if-exists=.env --test tests/e2e/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.9"
+  },
+  "license": "MIT"
+}

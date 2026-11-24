@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const { Pool } = require('pg');
+const { setupMetrics } = require('./metrics');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3007;
@@ -31,6 +32,25 @@ const pool = new Pool({
 });
 
 app.disable('x-powered-by');
+const metrics = setupMetrics(app, 'search-service');
+const searchQueries = metrics.counter({
+  name: 'search_queries_total',
+  help: 'Search requests by type (text = with q, browse = filters only) and whether anything matched',
+  labelNames: ['type', 'result']
+});
+const syncRuns = metrics.counter({
+  name: 'search_sync_runs_total',
+  help: 'Index synchronisation runs by result',
+  labelNames: ['result']
+});
+const indexedProducts = metrics.gauge({
+  name: 'search_index_products',
+  help: 'Active products in the search index after the last successful sync'
+});
+const lastSyncSuccess = metrics.gauge({
+  name: 'search_index_last_success_timestamp_seconds',
+  help: 'Unix time of the last successful index sync'
+});
 app.use(express.json({ limit: '10kb' }));
 
 class ApiError extends Error {
@@ -172,6 +192,7 @@ app.get('/search', async (req, res, next) => {
       values
     );
 
+    searchQueries.inc({ type: rawQuery ? 'text' : 'browse', result: totalItems ? 'hit' : 'empty' });
     return res.json({
       data: listResult.rows.map(mapResult),
       meta: {
@@ -332,6 +353,9 @@ async function syncIndex() {
     syncStatus.lastSuccessAt = new Date().toISOString();
     syncStatus.lastError = null;
     syncStatus.indexedProducts = products.length;
+    syncRuns.inc({ result: result.skipped ? 'skipped' : 'success' });
+    indexedProducts.set(products.length);
+    lastSyncSuccess.set(Date.now() / 1000);
     // Stay quiet when nothing changed so the logs are not flooded every interval.
     if (firstSuccess || result.changed || result.removed) {
       console.log(`Search index synced: ${products.length} active products, `
@@ -339,6 +363,7 @@ async function syncIndex() {
     }
   } catch (error) {
     syncStatus.lastError = error.message;
+    syncRuns.inc({ result: 'failure' });
     console.error('Search index sync failed; serving the last indexed data:', error.message);
   } finally {
     syncStatus.running = false;
@@ -379,20 +404,28 @@ app.use((error, req, res, next) => {
   return errorResponse(res, 500, 'INTERNAL_ERROR', 'An unexpected error occurred');
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Search service running on port ${PORT}`);
-  console.log(`Product service URL: ${PRODUCT_SERVICE_URL}; sync every ${SYNC_INTERVAL_SECONDS}s`);
-  syncIndex();
-});
-const syncTimer = setInterval(syncIndex, SYNC_INTERVAL_SECONDS * 1000);
-
-function close() {
-  clearInterval(syncTimer);
-  server.close(async () => {
-    await pool.end();
-    process.exit(0);
+function start() {
+  const server = app.listen(PORT, () => {
+    console.log(`Search service running on port ${PORT}`);
+    console.log(`Product service URL: ${PRODUCT_SERVICE_URL}; sync every ${SYNC_INTERVAL_SECONDS}s`);
+    syncIndex();
   });
+  const syncTimer = setInterval(syncIndex, SYNC_INTERVAL_SECONDS * 1000);
+
+  function close() {
+    clearInterval(syncTimer);
+    server.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', close);
+  process.on('SIGTERM', close);
+  return server;
 }
 
-process.on('SIGINT', close);
-process.on('SIGTERM', close);
+// Start only when run directly (node server.js); tests import the app without listening.
+if (require.main === module) start();
+
+module.exports = { app, pool, metrics, buildPrefixQuery, normalizeCatalogProduct, parsePriceFilter };
