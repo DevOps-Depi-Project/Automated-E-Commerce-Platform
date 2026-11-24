@@ -3,6 +3,7 @@
 #   - Docker CLI + Buildx + Compose plugin: build images and run the test stack on the host's
 #     Docker engine through the mounted /var/run/docker.sock
 #   - Node.js 22: run the unit and end-to-end tests
+#   - Ansible + SSH client: deploy the tested images to the AWS server (ansible/site.yml)
 # Plugins and configuration are baked in (Configuration as Code), so no setup wizard.
 
 FROM node:22-bookworm-slim AS node
@@ -20,7 +21,9 @@ RUN apt-get update \
       > /etc/apt/sources.list.d/docker.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin docker-compose-plugin \
- && rm -rf /var/lib/apt/lists/*
+      ansible-core openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
+ && ansible --version | head -1
 
 # Node.js from the official image (same Debian base, no curl | bash installer).
 COPY --from=node /usr/local/bin/node /usr/local/bin/node

@@ -1,7 +1,7 @@
 # Jenkins Configuration as Code. Applied on every start, so this file is the source of truth.
-# ${...} values come from environment variables; jenkins_admin_password and dockerhub_token
-# are Docker secrets mounted under /run/secrets (see jenkins/docker-compose.yml), so they
-# never appear in the environment of builds.
+# ${...} values come from environment variables; jenkins_admin_password, dockerhub_token
+# and deploy_ssh_key are Docker secrets mounted under /run/secrets (see
+# jenkins/docker-compose.yml), so they never appear in the environment of builds.
 jenkins:
   systemMessage: "E-Commerce Platform CI (local). Configured as code in jenkins/casc/jenkins.yaml."
   numExecutors: 1
@@ -26,6 +26,14 @@ credentials:
               username: "${DOCKERHUB_USER}"
               password: "${dockerhub_token}"
               description: "Docker Hub access token used by the Jenkinsfile to push images"
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: "deploy-ssh"
+              username: "ubuntu"
+              description: "SSH key for the AWS server; used by the Deploy to AWS stage (Ansible)"
+              privateKeySource:
+                directEntry:
+                  privateKey: "${deploy_ssh_key}"
 
 unclassified:
   location:
