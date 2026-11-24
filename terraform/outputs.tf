@@ -26,3 +26,8 @@ output "ami" {
   description = "Ubuntu image used for the server."
   value       = data.aws_ami.ubuntu.name
 }
+
+output "deploy_mode" {
+  description = "compose or k3s; decides which Ansible playbook (and Jenkins deploy) applies."
+  value       = var.deploy_mode
+}

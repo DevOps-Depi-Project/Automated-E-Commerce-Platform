@@ -1,0 +1,44 @@
+# Installs a single-node k3s cluster (lightweight Kubernetes with metrics-server built in).
+# Traefik is disabled: the frontend Service (type LoadBalancer) takes port 80 itself.
+
+- name: Check whether k3s is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Download the k3s installer
+  when: not k3s_binary.stat.exists
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+
+- name: Install k3s ({{ k3s_channel }} channel)
+  when: not k3s_binary.stat.exists
+  ansible.builtin.command: /tmp/k3s-install.sh
+  environment:
+    INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+    INSTALL_K3S_EXEC: >-
+      server --disable traefik --write-kubeconfig-mode 0644 --tls-san {{ ansible_host }}
+  changed_when: true
+
+- name: Wait until the node is Ready
+  ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=300s
+  changed_when: false
+
+- name: Wait until metrics-server is available (needed by the autoscalers)
+  ansible.builtin.command: k3s kubectl -n kube-system rollout status deployment/metrics-server --timeout=300s
+  changed_when: false
+
+- name: Read the cluster's kubeconfig
+  ansible.builtin.slurp:
+    src: /etc/rancher/k3s/k3s.yaml
+  register: k3s_kubeconfig
+
+- name: Save a kubeconfig for the admin machine (kubernetes/kubeconfig-aws.yaml, ignored by Git)
+  delegate_to: localhost
+  become: false
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../kubernetes/kubeconfig-aws.yaml"
+    content: "{{ k3s_kubeconfig.content | b64decode | replace('https://127.0.0.1:6443', 'https://' ~ ansible_host ~ ':6443') }}"
+    mode: "0600"

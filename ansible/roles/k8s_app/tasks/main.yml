@@ -1,0 +1,118 @@
+# Deploys the Kubernetes manifests (kubernetes/base) to the k3s cluster with an overlay
+# written for the requested image tag. Same release history and automatic rollback as the
+# Docker Compose role (roles/app), but rolling updates are done by Kubernetes.
+#
+# Files on the server (k8s_dir):
+#   base/                       copied from kubernetes/base
+#   overlay/kustomization.yaml  image tag of this release (written per deploy)
+#   overlay/secrets.env         random secrets, generated once on the server
+#   CURRENT_TAG / PREVIOUS_TAG / releases.log
+
+- name: Refuse an empty image tag
+  ansible.builtin.assert:
+    that: image_tag | string | length > 0
+    fail_msg: Pass the version to deploy, for example -e image_tag=80cb67d
+
+- name: Create the deployment directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ k8s_dir }}"
+    - "{{ k8s_dir }}/overlay"
+
+- name: Copy the Kubernetes manifests from the repository
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../kubernetes/base"
+    dest: "{{ k8s_dir }}/"
+    mode: "0640"
+    directory_mode: "0750"
+
+- name: Generate secrets on the server (first deploy only)
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      umask 077
+      {
+        echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+        echo "JWT_SECRET=$(openssl rand -hex 32)"
+        echo "INTERNAL_SERVICE_TOKEN=$(openssl rand -hex 32)"
+        echo "ADMIN_EMAIL={{ admin_email }}"
+        echo "ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)"
+      } > secrets.env
+    chdir: "{{ k8s_dir }}/overlay"
+    creates: "{{ k8s_dir }}/overlay/secrets.env"
+  no_log: true
+
+- name: Read the version that is running now
+  ansible.builtin.slurp:
+    src: "{{ k8s_dir }}/CURRENT_TAG"
+  register: current_tag_file
+  failed_when: false
+
+- name: Remember the running version for rollback
+  ansible.builtin.set_fact:
+    previous_release: "{{ (current_tag_file.content | default('') | b64decode).strip() }}"
+
+- name: Deploy and verify the requested version
+  block:
+    - name: Deploy {{ image_tag }}
+      ansible.builtin.include_tasks: release.yml
+      vars:
+        release_tag: "{{ image_tag }}"
+
+  rescue:
+    - name: Show the pods
+      ansible.builtin.command: k3s kubectl -n ecommerce get pods -o wide
+      changed_when: false
+      failed_when: false
+      register: failed_pods
+
+    - name: Print pod status
+      ansible.builtin.debug:
+        var: failed_pods.stdout_lines
+
+    - name: Roll back to {{ previous_release }}
+      when: auto_rollback | bool and previous_release | length > 0 and previous_release != image_tag
+      ansible.builtin.include_tasks: release.yml
+      vars:
+        release_tag: "{{ previous_release }}"
+
+    - name: Stop the deploy and report the result
+      ansible.builtin.fail:
+        msg: >-
+          Version {{ image_tag }} could not be deployed (apply, rollout or health checks failed).
+          {{ ('Rolled back to ' ~ previous_release ~ ', which is running again.')
+             if (auto_rollback | bool and previous_release | length > 0 and previous_release != image_tag)
+             else 'No earlier version to roll back to.' }}
+
+- name: Record the previous version
+  when: previous_release | length > 0 and previous_release != image_tag
+  ansible.builtin.copy:
+    dest: "{{ k8s_dir }}/PREVIOUS_TAG"
+    content: "{{ previous_release }}\n"
+    mode: "0644"
+
+- name: Record the running version
+  ansible.builtin.copy:
+    dest: "{{ k8s_dir }}/CURRENT_TAG"
+    content: "{{ image_tag }}\n"
+    mode: "0644"
+
+- name: Append to the release history
+  ansible.builtin.lineinfile:
+    path: "{{ k8s_dir }}/releases.log"
+    line: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }} {{ image_tag }} (previous: {{ previous_release | default('none', true) }})"
+    create: true
+    mode: "0644"
+
+- name: Summary
+  ansible.builtin.debug:
+    msg:
+      - "Running version on Kubernetes: {{ image_tag }} (previous: {{ previous_release | default('none', true) }})"
+      - "Storefront: http://{{ ansible_host }}/  Admin: http://{{ ansible_host }}/admin"
+      - "Admin password: on the server, sudo grep ADMIN_PASSWORD {{ k8s_dir }}/overlay/secrets.env"
+      - "kubectl from your machine: kubernetes/kubeconfig-aws.yaml"

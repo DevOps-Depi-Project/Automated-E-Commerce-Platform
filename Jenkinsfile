@@ -107,11 +107,16 @@ pipeline {
         withCredentials([sshUserPrivateKey(credentialsId: 'deploy-ssh', keyFileVariable: 'DEPLOY_KEY')]) {
           // site.yml is idempotent: it installs Docker on a new server and is quick on a
           // prepared one. Ansible rolls back automatically if the new version fails.
+          // The inventory group written by Terraform says how the server runs the stack:
+          // [app] = Docker Compose (site.yml), [k3s] = Kubernetes (k3s.yml).
           sh '''
             set -eu
             cd ansible
+            playbook=site.yml
+            if grep -q '^\\[k3s\\]' "$DEPLOY_INVENTORY"; then playbook=k3s.yml; fi
+            echo "Deploying $IMAGE_TAG with $playbook"
             export ANSIBLE_SSH_ARGS="-o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$WORKSPACE/.deploy_known_hosts"
-            ansible-playbook site.yml -i "$DEPLOY_INVENTORY" --private-key "$DEPLOY_KEY" -e image_tag="$IMAGE_TAG"
+            ansible-playbook "$playbook" -i "$DEPLOY_INVENTORY" --private-key "$DEPLOY_KEY" -e image_tag="$IMAGE_TAG"
           '''
         }
         // Check from outside, like a visitor (also proves the firewall allows HTTP).

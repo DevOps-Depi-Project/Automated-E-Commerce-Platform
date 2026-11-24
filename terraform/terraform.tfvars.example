@@ -7,3 +7,7 @@
 
 # By default SSH is allowed only from the public IP of the machine running Terraform.
 # admin_cidr = "203.0.113.7/32"
+
+# Kubernetes instead of Docker Compose: k3s needs about 4 GiB of memory.
+# deploy_mode   = "k3s"
+# instance_type = "c7i-flex.large"

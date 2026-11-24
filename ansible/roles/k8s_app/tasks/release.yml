@@ -1,0 +1,41 @@
+# Applies one version (release_tag) to the cluster and waits until it is healthy.
+# Included by main.yml for the requested version and, on failure, for the previous one.
+
+- name: "Write the overlay for {{ release_tag }}"
+  ansible.builtin.template:
+    src: kustomization.yaml.j2
+    dest: "{{ k8s_dir }}/overlay/kustomization.yaml"
+    mode: "0640"
+
+- name: "Apply version {{ release_tag }} (rolling update)"
+  ansible.builtin.command: k3s kubectl apply -k {{ k8s_dir }}/overlay
+  register: apply_result
+  changed_when: "'configured' in apply_result.stdout or 'created' in apply_result.stdout"
+
+- name: Wait for PostgreSQL
+  ansible.builtin.command: k3s kubectl -n ecommerce rollout status statefulset/postgres --timeout=600s
+  changed_when: false
+
+- name: Wait for every Deployment to finish its rolling update
+  ansible.builtin.command: k3s kubectl -n ecommerce rollout status deployment/{{ item }} --timeout=600s
+  loop: "{{ k8s_images }}"
+  changed_when: false
+
+- name: Check every public API through Nginx, like a real user
+  ansible.builtin.uri:
+    url: "http://{{ ansible_default_ipv4.address }}/api/{{ item }}/health"
+    status_code: 200
+  register: health
+  until: health.status == 200
+  retries: 20
+  delay: 3
+  loop: "{{ health_check_services }}"
+
+- name: Check the storefront page
+  ansible.builtin.uri:
+    url: "http://{{ ansible_default_ipv4.address }}/"
+    status_code: 200
+  register: storefront
+  until: storefront.status == 200
+  retries: 20
+  delay: 3
