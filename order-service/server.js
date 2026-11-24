@@ -14,7 +14,8 @@ const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN;
 const PRODUCT_SERVICE_URL = (process.env.PRODUCT_SERVICE_URL || 'http://product-service:3001').replace(/\/$/, '');
 const INVENTORY_SERVICE_URL = (process.env.INVENTORY_SERVICE_URL || 'http://inventory-service:3004').replace(/\/$/, '');
 const PAYMENT_SERVICE_URL = (process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3005/internal/payments').replace(/\/$/, '');
-const REQUEST_TIMEOUT_MS = 5000;
+// Timeout for calls to other services; configurable for slow or shared CI machines.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) || 5000;
 const PAGE_SIZE_DEFAULT = 20;
 const PAGE_SIZE_MAX = 100;
 const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'CANCELLED', 'FAILED'];

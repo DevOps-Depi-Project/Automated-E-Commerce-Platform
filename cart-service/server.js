@@ -11,7 +11,8 @@ const PORT = Number(process.env.PORT) || 3006;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET;
 const PRODUCT_SERVICE_URL = (process.env.PRODUCT_SERVICE_URL || 'http://product-service:3001').replace(/\/$/, '');
-const REQUEST_TIMEOUT_MS = 5000;
+// Timeout for calls to other services; configurable for slow or shared CI machines.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) || 5000;
 const MAX_QUANTITY = 2147483647;
 
 if (!DATABASE_URL) throw new Error('DATABASE_URL is required');

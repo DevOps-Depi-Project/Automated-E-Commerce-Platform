@@ -57,11 +57,13 @@ pipeline {
         sh 'set -a && . ./ci.env && set +a && npm run test:e2e'
       }
       post {
+        // Declarative "post" runs always -> ... -> failure -> ... -> cleanup, so the stack is
+        // removed in "cleanup"; otherwise it would be gone before the failure logs are printed.
         failure {
           sh '$COMPOSE ps -a || true'
-          sh '$COMPOSE logs --no-color --tail=80 || true'
+          sh '$COMPOSE logs --no-color --timestamps --tail=120 || true'
         }
-        always {
+        cleanup {
           sh '$COMPOSE down -v --remove-orphans || true'
         }
       }

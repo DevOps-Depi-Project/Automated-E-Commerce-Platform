@@ -13,6 +13,8 @@ const lines = [
   'POSTGRES_DB=ecommerce',
   `JWT_SECRET=${random(32)}`,
   `INTERNAL_SERVICE_TOKEN=${random(32)}`,
+  // CI machines are often busy; give service-to-service calls more time than the 5 s default.
+  'REQUEST_TIMEOUT_MS=15000',
   'ADMIN_EMAIL=ci-admin@example.com',
   `ADMIN_PASSWORD=Ci-${random(12)}`,
   // No spaces in values: the Jenkinsfile loads this file with the shell (". ./ci.env").
