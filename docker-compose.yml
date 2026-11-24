@@ -1,3 +1,6 @@
+# Images are named <DOCKERHUB_USER>/ecommerce-<service>:<IMAGE_TAG> (set both in .env).
+# Build with "docker compose build" and publish with "docker compose push".
+
 # Shared healthcheck settings for the Node.js services.
 # BusyBox wget (built into Alpine) is far lighter than starting a node process per check.
 x-node-healthcheck: &node-healthcheck
@@ -28,6 +31,7 @@ services:
     build:
       context: ./authentication-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-authentication-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     # A bad ADMIN_* value is logged but does not stop the service from starting.
     command: sh -c 'npm run migrate && { if [ -n "$$ADMIN_EMAIL" ] && [ -n "$$ADMIN_PASSWORD" ]; then npm run seed:admin || echo "WARNING - admin seed failed, continuing without it"; fi; } && exec node server.js'
@@ -56,6 +60,7 @@ services:
     build:
       context: ./product-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-product-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     # Internal only: the browser reaches this service through Nginx at /api/...
@@ -79,6 +84,7 @@ services:
     build:
       context: ./cart-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-cart-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     # Internal only: the browser reaches this service through Nginx at /api/...
@@ -105,6 +111,7 @@ services:
     build:
       context: ./inventory-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-inventory-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     # Internal only: the browser reaches this service through Nginx at /api/...
@@ -130,6 +137,7 @@ services:
     build:
       context: ./order-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-order-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     # Internal only: the browser reaches this service through Nginx at /api/...
@@ -163,6 +171,7 @@ services:
     build:
       context: ./payment-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-payment-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     expose:
@@ -188,6 +197,7 @@ services:
     build:
       context: ./search-service
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-search-service:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: sh -c "npm run migrate && exec node server.js"
     expose:
@@ -213,6 +223,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    image: ${DOCKERHUB_USER:-local}/ecommerce-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "3000:80"

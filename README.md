@@ -391,6 +391,26 @@ docker compose down -v
 
 Only use `docker compose down -v` when you intentionally want to reset the local database.
 
+### 12.1 Docker Hub Images
+
+Every service image is named `<DOCKERHUB_USER>/ecommerce-<service>:<IMAGE_TAG>`, for example `mosab2004/ecommerce-search-service:6f286d9`. Set `DOCKERHUB_USER` and `IMAGE_TAG` in `.env`. Each release is pushed twice: with the short Git commit ID (an immutable version that rollbacks can return to) and as `latest`.
+
+Run a published version without building anything (this is how servers deploy):
+
+```bash
+IMAGE_TAG=6f286d9 docker compose pull
+IMAGE_TAG=6f286d9 docker compose up -d --no-build
+```
+
+Build and publish a new version (requires `docker login` with push access to the account):
+
+```bash
+IMAGE_TAG=$(git rev-parse --short HEAD) docker compose build
+IMAGE_TAG=$(git rev-parse --short HEAD) docker compose push
+```
+
+The images contain no secrets: `.env` is excluded by each service's `.dockerignore`, and secrets are passed only as environment variables at runtime. Docker Hub repositories are public by default.
+
 ## 13. API and Health Checks
 
 All public APIs are reached through the Nginx reverse proxy on port 3000. Exact routes and request/response contracts are defined in each service's source code and in the API documentation under `docs/api-contracts/`.
