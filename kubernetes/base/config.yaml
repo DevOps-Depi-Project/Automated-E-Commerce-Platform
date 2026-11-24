@@ -1,0 +1,24 @@
+# Non-secret settings shared by the services (the Kubernetes version of the Compose
+# environment blocks). Secrets come from the "ecommerce-secrets" Secret created by each
+# overlay's secretGenerator.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecommerce-config
+  labels:
+    app.kubernetes.io/part-of: ecommerce
+data:
+  NODE_ENV: production
+  POSTGRES_USER: ecommerce
+  POSTGRES_DB: ecommerce
+  PRODUCT_SERVICE_URL: http://product-service:3001
+  INVENTORY_SERVICE_URL: http://inventory-service:3004
+  PAYMENT_SERVICE_URL: http://payment-service:3005/internal/payments
+  RESERVATION_TTL_SECONDS: "900"
+  REQUEST_TIMEOUT_MS: "5000"
+  SEARCH_SYNC_INTERVAL_SECONDS: "30"
+  PAYMENT_SIMULATION_ENABLED: "false"
+  PAYMENT_DEFAULT_RESULT: success
+  # The browser reaches every API through Nginx on the same origin, so CORS only matters
+  # for direct calls to the Authentication Service during development.
+  CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000

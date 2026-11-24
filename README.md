@@ -125,7 +125,7 @@ Nginx removes the `/api/<service>` prefix before forwarding, so `GET /api/search
 | JWT | Authentication and authorization | In use |
 | Mock Payment | Academic payment simulation | In use |
 | Jenkins | CI/CD automation | Planned |
-| Kubernetes | Container orchestration and scaling | Planned |
+| Kubernetes | Container orchestration and scaling | In progress (manifests, probes, HPA; AWS k3s next) |
 | Ansible | Configuration management | Planned |
 | Terraform | Infrastructure provisioning | Planned |
 | AWS EC2 | Compute infrastructure | Planned |
@@ -144,7 +144,7 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 | Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
 | 2. CI/CD pipelines for updates | Done: Jenkins tests, builds and publishes images, then deploys `main` to AWS with Ansible (`Jenkinsfile`) |
-| 3. Kubernetes deployment with auto-scaling | Planned |
+| 3. Kubernetes deployment with auto-scaling | In progress: manifests with probes, rolling updates and HPA (`kubernetes/`); deployment on AWS with k3s next |
 | 4. Ansible scripts for server/configuration setup | Done: `ansible/` installs Docker and deploys the stack on EC2 |
 | 5. Prometheus dashboards for service monitoring | Done: Prometheus scrapes every service, Grafana dashboard and alert rules provisioned as code (`monitoring/`) |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
@@ -542,6 +542,7 @@ Automated-E-Commerce-Platform/
 │   ├── api-contracts/
 │   ├── implementation-roadmap.md
 │   └── original-project-proposal.md
+├── kubernetes/               # Kustomize manifests (base + overlays), HPA, metrics-server addon
 ├── monitoring/               # Prometheus config + alerts, Grafana provisioning + dashboards
 ├── tests/
 │   ├── e2e/smoke.test.js     # end-to-end test against the running stack
@@ -687,7 +688,53 @@ docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terra
 
 Terraform state (`terraform/terraform.tfstate`) is local and ignored by Git; for team use it should move to an S3 backend.
 
-### 17.3 Deployment Roadmap
+### 17.3 Kubernetes
+
+The same images run on Kubernetes. The manifests are in [`kubernetes/`](kubernetes/) and use Kustomize (built into `kubectl`):
+
+```text
+kubernetes/base/                 shared definition (namespace "ecommerce")
+  config.yaml                    ConfigMap with the non-secret settings
+  postgres.yaml                  StatefulSet + 1 GiB persistent volume
+  <service>.yaml                 Deployment + Service for each Node.js service
+  frontend.yaml                  Nginx (2 replicas) + LoadBalancer Service
+  hpa.yaml                       autoscalers for search, product and frontend
+kubernetes/overlays/local/       Docker Desktop: image versions, Secret, port 8000
+kubernetes/addons/metrics-server metrics-server for Docker Desktop (k3s has it built in)
+kubernetes/generate-secrets.js   creates the overlay's secrets.env (ignored by Git)
+```
+
+What each workload gets:
+
+- **Probes:** a startup probe gives migrations (and PostgreSQL's first initialisation) several minutes; the readiness probe decides when a pod receives traffic; the liveness probe restarts a pod that hangs. Probe timeouts are generous so a slow machine does not cause restart loops.
+- **Zero-downtime rolling updates:** `maxSurge: 1`, `maxUnavailable: 0`, so a new pod must be ready before an old one stops; the last five versions are kept for rollback.
+- **Autoscaling (HPA):** `search-service` and `product-service` scale from 1 to 4 pods and `frontend` from 2 to 4 when average CPU passes 60% of the requested CPU.
+- **Resources and security:** CPU/memory requests and limits on every container; Node.js services run as a non-root user without extra Linux capabilities; an init container waits for PostgreSQL.
+- **Secrets:** a Kustomize `secretGenerator` builds the `ecommerce-secrets` Secret from `secrets.env`; the services read them as environment variables, never from the repository.
+- **Nginx in Kubernetes:** the frontend image renders its config from `frontend/nginx.conf.template`; in Kubernetes it uses the cluster DNS (`kube-dns`) and fully qualified service names, in Docker Compose the Docker DNS.
+
+Run locally (Docker Desktop → Settings → Kubernetes → Enable). The stack needs several GB of memory; on a machine with 8 GB of RAM use the AWS server instead (see the roadmap below).
+
+```bash
+kubectl apply -k kubernetes/addons/metrics-server
+node kubernetes/generate-secrets.js kubernetes/overlays/local
+kubectl apply -k kubernetes/overlays/local
+kubectl -n ecommerce get pods,hpa
+# storefront: http://localhost:8000
+```
+
+Rolling update, history and rollback:
+
+```bash
+kubectl -n ecommerce set image deployment/search-service search-service=mosab2004/ecommerce-search-service:<new-commit>
+kubectl -n ecommerce rollout status deployment/search-service
+kubectl -n ecommerce rollout history deployment/search-service
+kubectl -n ecommerce rollout undo deployment/search-service
+```
+
+Remove everything: `kubectl delete namespace ecommerce`.
+
+### 17.4 Deployment Roadmap
 
 The project proposal includes a broader DevOps direction:
 

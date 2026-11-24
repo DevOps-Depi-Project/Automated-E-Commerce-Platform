@@ -1,0 +1,58 @@
+# Kubernetes in Docker Desktop. Before the first apply, create the secrets file:
+#   node kubernetes/generate-secrets.js kubernetes/overlays/local
+#   kubectl apply -k kubernetes/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Must match the base: the generated Secret has to live in the same namespace as the pods,
+# otherwise Kustomize cannot rename the references to its hashed name.
+namespace: ecommerce
+
+resources:
+  - ../../base
+
+# Image version for every service: a commit tag that Jenkins published to Docker Hub.
+# Change it with "kubectl set image" for a rolling update, or edit it here.
+images:
+  - name: mosab2004/ecommerce-authentication-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-product-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-cart-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-inventory-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-order-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-payment-service
+    newTag: cf32e8d
+  - name: mosab2004/ecommerce-search-service
+    newTag: cf32e8d
+  # The Kubernetes-ready frontend (nginx config template) is built locally until Jenkins
+  # publishes it from main; then use the same commit tag as the other services.
+  - name: mosab2004/ecommerce-frontend
+    newTag: k8s-dev
+
+# Secret values live in secrets.env next to this file (ignored by Git).
+secretGenerator:
+  - name: ecommerce-secrets
+    envs:
+      - secrets.env
+
+patches:
+  # Port 80 on Windows is often taken; publish the storefront on localhost:8000 instead.
+  - target:
+      kind: Service
+      name: frontend
+    patch: |-
+      - op: replace
+        path: /spec/ports/0/port
+        value: 8000
+  # The local images are not on Docker Hub; never try to pull them.
+  - target:
+      kind: Deployment
+      name: frontend
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
