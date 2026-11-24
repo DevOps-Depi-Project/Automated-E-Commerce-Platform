@@ -1,0 +1,57 @@
+# Alert rules, visible at http://localhost:9090/alerts (and in Grafana).
+# Health-check and metrics traffic is excluded so it does not hide real user traffic.
+groups:
+  - name: ecommerce-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job="ecommerce-services"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is down"
+          description: "Prometheus could not scrape {{ $labels.service }} for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          100 * sum by (service) (rate(http_requests_total{status_code=~"5..", route!~"/health|/metrics"}[5m]))
+            / sum by (service) (rate(http_requests_total{route!~"/health|/metrics"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: more than 5% of requests fail"
+          description: "{{ $value | printf \"%.1f\" }}% of requests returned 5xx over the last 5 minutes."
+
+      - alert: SlowResponses
+        expr: |
+          histogram_quantile(0.95,
+            sum by (service, le) (rate(http_request_duration_seconds_bucket{route!~"/health|/metrics"}[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: p95 latency above 1 s"
+          description: "95% of requests take up to {{ $value | printf \"%.2f\" }} s."
+
+  - name: ecommerce-business
+    rules:
+      - alert: CheckoutsFailing
+        expr: |
+          sum(rate(orders_checkout_requests_total{outcome!~"CONFIRMED|REPLAYED|PENDING|VALIDATION_ERROR"}[10m]))
+            / sum(rate(orders_checkout_requests_total[10m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than half of checkouts fail"
+          description: "Check Inventory, Payment and Product: most checkouts end with an error."
+
+      - alert: SearchIndexStale
+        expr: time() - search_index_last_success_timestamp_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Search index not synced for more than 5 minutes"
+          description: "Search keeps serving its last snapshot; Product Service may be unreachable."

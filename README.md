@@ -132,8 +132,8 @@ Nginx removes the `/api/<service>` prefix before forwarding, so `GET /api/search
 | AWS RDS | Managed relational database | Planned |
 | AWS S3 | Object and asset storage | Planned / if required |
 | AWS ELB | Load balancing | Planned |
-| Prometheus | Metrics collection and alerting | Planned |
-| Grafana | Monitoring dashboards | Planned |
+| Prometheus | Metrics collection and alerting | In use (local, profile `monitoring`) |
+| Grafana | Monitoring dashboards | In use (local, profile `monitoring`) |
 
 ### 4.1 Course Requirements Checklist
 
@@ -146,7 +146,7 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 | 2. CI/CD pipelines for updates | Done: Jenkins tests, builds and publishes images, then deploys `main` to AWS with Ansible (`Jenkinsfile`) |
 | 3. Kubernetes deployment with auto-scaling | Planned |
 | 4. Ansible scripts for server/configuration setup | Done: `ansible/` installs Docker and deploys the stack on EC2 |
-| 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
+| 5. Prometheus dashboards for service monitoring | Done: Prometheus scrapes every service, Grafana dashboard and alert rules provisioned as code (`monitoring/`) |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
 | 7. Terraform scripts for AWS EC2, RDS, S3, ELB | In progress: `terraform/` creates the VPC, security group and EC2 server; RDS, S3 and ELB come with the Kubernetes phase |
 | 8. Automated rollback strategies | In progress: `ansible/deploy.yml` rolls back automatically when health checks fail; Kubernetes rollouts planned |
@@ -456,6 +456,38 @@ Every series has a `service` label. To look at the raw output locally:
 docker compose exec search-service wget -qO- http://127.0.0.1:3007/metrics | head -40
 ```
 
+### 13.2 Monitoring with Prometheus and Grafana
+
+Prometheus and Grafana are optional services in `docker-compose.yml` (Compose profile `monitoring`), so they use memory only when needed:
+
+```bash
+docker compose --profile monitoring up -d --wait
+```
+
+- **Prometheus:** [http://localhost:9090](http://localhost:9090) scrapes all seven services every 15 seconds (`monitoring/prometheus/prometheus.yml`) and keeps 7 days of data. Alerts: [http://localhost:9090/alerts](http://localhost:9090/alerts).
+- **Grafana:** [http://localhost:3100](http://localhost:3100) opens the **E-Commerce Overview** dashboard directly. Viewing needs no login; editing uses `admin` / `GRAFANA_ADMIN_PASSWORD` from `.env` (default `admin`).
+
+Everything is provisioned as code, so nothing is configured by hand:
+
+```text
+monitoring/prometheus/prometheus.yml        scrape targets
+monitoring/prometheus/alerts.yml            alert rules
+monitoring/grafana/provisioning/            Prometheus data source + dashboard loader
+monitoring/grafana/dashboards/*.json        dashboards
+```
+
+The dashboard has four rows: **Health** (each service UP/DOWN), **Traffic** (requests per second, 5xx error rate, p95 latency, status codes; health checks excluded), **Business** (confirmed orders, revenue, checkouts by outcome, searches, search index size and age) and **Resources** (memory, CPU, event loop lag per service).
+
+| Alert | Fires when |
+|---|---|
+| `ServiceDown` | A service cannot be scraped for 1 minute |
+| `HighErrorRate` | More than 5% of a service's requests return 5xx for 5 minutes |
+| `SlowResponses` | p95 latency of a service is above 1 s for 5 minutes |
+| `CheckoutsFailing` | More than half of checkouts end with an error for 10 minutes |
+| `SearchIndexStale` | The search index has not synced for more than 5 minutes |
+
+Tested by stopping `search-service`: `ServiceDown` went to *pending* after about 30 s, to *firing* after 1 minute, and cleared when the service was started again. Alerts are shown in Prometheus and Grafana; sending them by e-mail or chat (Alertmanager) is a possible next step.
+
 ## 14. Testing
 
 Tests use Node.js's built-in test runner (`node --test`), so no extra test libraries are needed. Node.js 22.9 or newer is required on the machine that runs them.
@@ -510,6 +542,7 @@ Automated-E-Commerce-Platform/
 │   ├── api-contracts/
 │   ├── implementation-roadmap.md
 │   └── original-project-proposal.md
+├── monitoring/               # Prometheus config + alerts, Grafana provisioning + dashboards
 ├── tests/
 │   ├── e2e/smoke.test.js     # end-to-end test against the running stack
 │   └── run-unit-tests.js     # runs every service's unit tests
