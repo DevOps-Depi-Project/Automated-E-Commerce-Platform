@@ -26,6 +26,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      # The first start initialises the database; on a busy machine (e.g. the CI host) that
+      # can take minutes. Failures during start_period do not count against retries.
+      start_period: 120s
 
   authentication-service:
     build:

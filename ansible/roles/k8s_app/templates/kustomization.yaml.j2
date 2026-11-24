@@ -1,0 +1,19 @@
+# Managed by Ansible (roles/k8s_app): the AWS overlay for release {{ release_tag }}.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ecommerce
+
+resources:
+  - ../base
+
+images:
+{% for service in k8s_images %}
+  - name: {{ dockerhub_user }}/ecommerce-{{ service }}
+    newTag: "{{ release_tag }}"
+{% endfor %}
+
+secretGenerator:
+  - name: ecommerce-secrets
+    envs:
+      - secrets.env

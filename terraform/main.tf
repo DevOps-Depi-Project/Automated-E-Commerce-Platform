@@ -100,6 +100,17 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   cidr_ipv4         = local.admin_cidr
 }
 
+# Kubernetes API of k3s, so kubectl works from the admin machine (k3s mode only).
+resource "aws_vpc_security_group_ingress_rule" "kubernetes_api" {
+  count             = var.deploy_mode == "k3s" ? 1 : 0
+  security_group_id = aws_security_group.app.id
+  description       = "Kubernetes API (k3s), admin IP only"
+  ip_protocol       = "tcp"
+  from_port         = 6443
+  to_port           = 6443
+  cidr_ipv4         = local.admin_cidr
+}
+
 resource "aws_vpc_security_group_egress_rule" "all" {
   security_group_id = aws_security_group.app.id
   description       = "Outbound (apt, Docker Hub)"
@@ -134,9 +145,13 @@ resource "aws_instance" "app" {
     http_tokens   = "required"
   }
 
-  # "standard" avoids surprise charges: t3 defaults to "unlimited" CPU bursting, billed extra.
-  credit_specification {
-    cpu_credits = "standard"
+  # "standard" avoids surprise charges: burstable t-family instances default to "unlimited"
+  # CPU bursting, billed extra. Other families (e.g. c7i-flex for k3s) do not accept the setting.
+  dynamic "credit_specification" {
+    for_each = startswith(var.instance_type, "t") ? [1] : []
+    content {
+      cpu_credits = "standard"
+    }
   }
 
   tags = { Name = "${var.project}-app" }
@@ -164,5 +179,6 @@ resource "local_file" "ansible_inventory" {
   file_permission = "0644"
   content = templatefile("${path.module}/templates/hosts.ini.tftpl", {
     public_ip = aws_eip.app.public_ip
+    group     = var.deploy_mode == "k3s" ? "k3s" : "app"
   })
 }

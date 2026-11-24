@@ -50,3 +50,14 @@ variable "admin_cidr" {
     error_message = "admin_cidr must be empty or a CIDR block such as 203.0.113.7/32."
   }
 }
+
+variable "deploy_mode" {
+  description = "How the server runs the application: \"compose\" (Docker Compose, ansible/site.yml) or \"k3s\" (Kubernetes, ansible/k3s.yml)."
+  type        = string
+  default     = "compose"
+
+  validation {
+    condition     = contains(["compose", "k3s"], var.deploy_mode)
+    error_message = "deploy_mode must be \"compose\" or \"k3s\"."
+  }
+}

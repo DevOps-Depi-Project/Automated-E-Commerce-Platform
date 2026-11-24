@@ -1,0 +1,23 @@
+# Kubernetes on the AWS server: install k3s, then deploy the manifests in kubernetes/base.
+#   ansible-playbook k3s.yml -e image_tag=<commit>
+# Needs a server created with deploy_mode = "k3s" (inventory group "k3s").
+# A failed deploy is rolled back to the previous version automatically.
+- name: Install k3s and deploy the e-commerce stack on Kubernetes
+  hosts: k3s
+  become: true
+  vars:
+    k3s_channel: v1.31
+    k8s_dir: /opt/ecommerce-k8s
+    # Deployments in kubernetes/base (each image is <dockerhub_user>/ecommerce-<name>).
+    k8s_images:
+      - authentication-service
+      - product-service
+      - cart-service
+      - inventory-service
+      - order-service
+      - payment-service
+      - search-service
+      - frontend
+  roles:
+    - k3s
+    - k8s_app
