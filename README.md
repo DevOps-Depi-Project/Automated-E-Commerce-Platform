@@ -143,7 +143,7 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 |---|---|
 | Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
-| 2. CI/CD pipelines for updates | Planned (Jenkins) |
+| 2. CI/CD pipelines for updates | Done for CI: Jenkins builds, tests and publishes images (`Jenkinsfile`); automatic deployment is planned |
 | 3. Kubernetes deployment with auto-scaling | Planned |
 | 4. Ansible scripts for server/configuration setup | Planned |
 | 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
@@ -557,7 +557,41 @@ These future directories should be added as the corresponding components are imp
 - [API contracts](docs/api-contracts/)
 - [Implementation roadmap](docs/implementation-roadmap.md)
 
-## 17. CI/CD and Deployment Roadmap
+## 17. CI/CD with Jenkins
+
+The pipeline is defined in the root [`Jenkinsfile`](Jenkinsfile) and runs on a local Jenkins that is itself configured as code in [`jenkins/`](jenkins/).
+
+```text
+every branch:  Prepare -> Unit tests -> Build images -> End-to-end test
+main only:                                                 -> Push to Docker Hub
+```
+
+- **Prepare:** the image tag is the short commit ID; `tests/write-ci-env.js` generates random throwaway secrets for the test stack.
+- **Unit tests:** `npm run test:unit` for all services.
+- **Build images:** `docker compose build`, two images at a time.
+- **End-to-end test:** starts the stack as a separate Compose project (`ecommerce-ci`, port 3080, its own database volume), runs `npm run test:e2e`, prints container logs if it fails, and always deletes the stack and its volume.
+- **Push to Docker Hub:** only on `main`, and only if every earlier stage passed. Each image is pushed as `<commit>` (immutable, used for rollback) and `latest`.
+
+### 17.1 Running Jenkins Locally
+
+Jenkins runs in Docker and drives the host's Docker engine through the mounted Docker socket. Plugins, the admin user, the Docker Hub credential and the `ecommerce-platform` multibranch job are created automatically from [`jenkins/casc/jenkins.yaml`](jenkins/casc/jenkins.yaml) (Configuration as Code); there is no setup wizard.
+
+1. Create a Docker Hub personal access token with **Read & Write** scope (hub.docker.com → Account settings → Personal access tokens).
+2. Create `jenkins/.env` from [`jenkins/.env.example`](jenkins/.env.example) and fill in the Jenkins admin password, Docker Hub user and token. The file is ignored by Git.
+3. Start Jenkins (stop the application stack first if memory is limited; Jenkins needs about 1 GB):
+
+   ```bash
+   cd jenkins
+   docker compose up -d --build
+   ```
+
+4. Open [http://localhost:8090](http://localhost:8090) (or the `JENKINS_PORT` you set) and sign in with `JENKINS_ADMIN_USER` / `JENKINS_ADMIN_PASSWORD`.
+
+The job scans the GitHub repository every 2 minutes and builds any branch that has new commits (GitHub cannot send webhooks to a laptop). To build immediately, open the job and click **Scan Multibranch Pipeline Now**, or **Build Now** on a branch.
+
+The admin password and the Docker Hub token are passed as Docker secrets (files in `/run/secrets`), not environment variables, so builds cannot print them. On Linux, set `DOCKER_SOCKET_GID` in `jenkins/.env` to the group id of `/var/run/docker.sock`.
+
+### 17.2 Deployment Roadmap
 
 The project proposal includes a broader DevOps direction:
 

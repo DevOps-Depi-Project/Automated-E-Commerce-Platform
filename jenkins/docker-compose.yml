@@ -1,0 +1,45 @@
+# Local Jenkins for the CI pipeline. Run from this folder:
+#   cd jenkins
+#   docker compose up -d --build
+# then open http://localhost:8090 (user/password from jenkins/.env).
+# Host port 8090 avoids 8080, which other software often uses; change it with JENKINS_PORT.
+name: ecommerce-jenkins
+
+services:
+  jenkins:
+    build: .
+    image: ecommerce-jenkins:local
+    container_name: ecommerce-jenkins
+    restart: unless-stopped
+    ports:
+      - "${JENKINS_PORT:-8090}:8080"
+    environment:
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false -Xmx768m"
+      JENKINS_URL: http://localhost:${JENKINS_PORT:-8090}/
+      JENKINS_ADMIN_USER: ${JENKINS_ADMIN_USER:-admin}
+      DOCKERHUB_USER: ${DOCKERHUB_USER:?Set DOCKERHUB_USER in jenkins/.env}
+      GIT_REPO_URL: ${GIT_REPO_URL:-https://github.com/DevOps-Depi-Project/Automated-E-Commerce-Platform.git}
+    # Passwords are mounted as files in /run/secrets, which Configuration as Code reads.
+    secrets:
+      - jenkins_admin_password
+      - dockerhub_token
+    # Jenkins drives the host's Docker engine (docker-outside-of-docker). The socket belongs
+    # to group 0 on Docker Desktop; on Linux set DOCKER_SOCKET_GID to its group id
+    # (stat -c %g /var/run/docker.sock).
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Lets the pipeline reach the test stack's published port on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+secrets:
+  jenkins_admin_password:
+    environment: JENKINS_ADMIN_PASSWORD
+  dockerhub_token:
+    environment: DOCKERHUB_TOKEN
+
+volumes:
+  jenkins_home:

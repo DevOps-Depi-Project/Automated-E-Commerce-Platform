@@ -226,7 +226,7 @@ services:
     image: ${DOCKERHUB_USER:-local}/ecommerce-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       product-service:
         condition: service_healthy
