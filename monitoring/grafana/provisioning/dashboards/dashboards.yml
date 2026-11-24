@@ -1,0 +1,11 @@
+# Loads every dashboard JSON in /etc/grafana/dashboards (monitoring/grafana/dashboards).
+apiVersion: 1
+
+providers:
+  - name: ecommerce
+    folder: E-Commerce
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards
