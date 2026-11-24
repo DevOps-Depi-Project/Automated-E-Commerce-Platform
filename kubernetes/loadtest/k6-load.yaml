@@ -1,0 +1,73 @@
+# Load test that makes the autoscalers (kubernetes/base/hpa.yaml) add pods.
+# Runs inside the cluster and calls the storefront APIs through the Nginx frontend:
+#   kubectl -n ecommerce apply -f kubernetes/loadtest/k6-load.yaml
+#   kubectl -n ecommerce get hpa -w          (watch REPLICAS grow, then shrink)
+#   kubectl -n ecommerce logs -f job/k6-load (k6 summary at the end)
+#   kubectl -n ecommerce delete -f kubernetes/loadtest/k6-load.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-load-script
+  labels:
+    app.kubernetes.io/name: k6-load
+    app.kubernetes.io/part-of: ecommerce
+data:
+  load.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+
+    const BASE = 'http://frontend';
+    const words = ['lap', 'labtop', 'phone', 'head', 'wireless', 'battery', 'smart', 'pro'];
+
+    // Ramp up to 40 virtual users, hold for 3 minutes, then stop.
+    export const options = {
+      stages: [
+        { duration: '30s', target: 40 },
+        { duration: '3m', target: 40 },
+        { duration: '20s', target: 0 },
+      ],
+      thresholds: {
+        http_req_failed: ['rate<0.01'],
+        http_req_duration: ['p(95)<2000'],
+      },
+    };
+
+    export default function () {
+      const q = words[Math.floor(Math.random() * words.length)];
+      const search = http.get(`${BASE}/api/search/search?q=${q}`);
+      check(search, { 'search 200': r => r.status === 200 });
+      const products = http.get(`${BASE}/api/product/products?pageSize=20`);
+      check(products, { 'products 200': r => r.status === 200 });
+      sleep(0.1);
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  labels:
+    app.kubernetes.io/name: k6-load
+    app.kubernetes.io/part-of: ecommerce
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k6-load
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.52.0
+          args: ["run", "--summary-trend-stats=avg,p(95),max", "/scripts/load.js"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          resources:
+            requests: { cpu: 200m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - name: script
+          configMap:
+            name: k6-load-script

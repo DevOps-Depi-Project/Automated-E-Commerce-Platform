@@ -33,11 +33,12 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
-      # Wait for PostgreSQL so the migration does not fail and restart the pod.
+      # Wait for PostgreSQL so the migration does not fail and restart the pod. -U is required:
+      # without it pg_isready looks up the OS user, and uid 1000 does not exist in this image.
       initContainers:
         - name: wait-for-postgres
           image: postgres:16-alpine
-          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -q; do echo waiting for postgres; sleep 2; done"]
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U ecommerce -q; do echo waiting for postgres; sleep 2; done"]
           securityContext:
             allowPrivilegeEscalation: false
           resources:

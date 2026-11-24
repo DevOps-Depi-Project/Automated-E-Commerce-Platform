@@ -26,8 +26,14 @@
   ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=300s
   changed_when: false
 
+# k3s creates its add-ons a few seconds after the node is Ready, so the Deployment may not
+# exist yet on the first attempts; keep asking instead of failing immediately.
 - name: Wait until metrics-server is available (needed by the autoscalers)
-  ansible.builtin.command: k3s kubectl -n kube-system rollout status deployment/metrics-server --timeout=300s
+  ansible.builtin.command: k3s kubectl -n kube-system rollout status deployment/metrics-server --timeout=60s
+  register: metrics_server
+  until: metrics_server.rc == 0
+  retries: 10
+  delay: 10
   changed_when: false
 
 - name: Read the cluster's kubeconfig

@@ -125,7 +125,7 @@ Nginx removes the `/api/<service>` prefix before forwarding, so `GET /api/search
 | JWT | Authentication and authorization | In use |
 | Mock Payment | Academic payment simulation | In use |
 | Jenkins | CI/CD automation | Planned |
-| Kubernetes | Container orchestration and scaling | In progress (manifests, probes, HPA; AWS k3s next) |
+| Kubernetes | Container orchestration and scaling | In use (k3s on AWS; manifests in `kubernetes/`) |
 | Ansible | Configuration management | Planned |
 | Terraform | Infrastructure provisioning | Planned |
 | AWS EC2 | Compute infrastructure | Planned |
@@ -144,12 +144,12 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 | Web, database, payment and search components | Done: Frontend, PostgreSQL, Payment Service (mock), Search Service |
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
 | 2. CI/CD pipelines for updates | Done: Jenkins tests, builds and publishes images, then deploys `main` to AWS with Ansible (`Jenkinsfile`) |
-| 3. Kubernetes deployment with auto-scaling | In progress: manifests with probes, rolling updates and HPA (`kubernetes/`); deployment on AWS with k3s next |
+| 3. Kubernetes deployment with auto-scaling | Done: k3s on AWS (`ansible/k3s.yml`), probes, zero-downtime rolling updates, HPA tested under load (1 → 4 pods) |
 | 4. Ansible scripts for server/configuration setup | Done: `ansible/` installs Docker and deploys the stack on EC2 |
 | 5. Prometheus dashboards for service monitoring | Done: Prometheus scrapes every service, Grafana dashboard and alert rules provisioned as code (`monitoring/`) |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
 | 7. Terraform scripts for AWS EC2, RDS, S3, ELB | In progress: `terraform/` creates the VPC, security group and EC2 server; RDS, S3 and ELB come with the Kubernetes phase |
-| 8. Automated rollback strategies | In progress: `ansible/deploy.yml` rolls back automatically when health checks fail; Kubernetes rollouts planned |
+| 8. Automated rollback strategies | Done: Ansible rolls back automatically on failed deploys (Compose and k3s); Kubernetes rolling updates and `rollout undo` |
 | 9. Git repository for code and scripts | Done |
 
 ## 5. Team Members
@@ -733,6 +733,32 @@ kubectl -n ecommerce rollout undo deployment/search-service
 ```
 
 Remove everything: `kubectl delete namespace ecommerce`.
+
+#### Kubernetes on AWS with k3s
+
+k3s is a lightweight, certified Kubernetes distribution (metrics-server included). Terraform and Ansible create and configure it on one EC2 server:
+
+```bash
+# terraform/terraform.tfvars:  deploy_mode = "k3s"   instance_type = "c7i-flex.large"  (4 GiB)
+docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terraform apply
+docker compose -f infra/docker-compose.yml run --rm -w /work/ansible infra ansible-playbook k3s.yml -e image_tag=<commit>
+kubectl --kubeconfig kubernetes/kubeconfig-aws.yaml -n ecommerce get pods,hpa
+```
+
+- `deploy_mode = "k3s"` opens the Kubernetes API (port 6443) to the admin IP only and writes the inventory group `[k3s]`.
+- `ansible/k3s.yml` installs k3s (Traefik disabled; the frontend LoadBalancer Service listens on port 80), saves `kubernetes/kubeconfig-aws.yaml` (ignored by Git) for `kubectl` on the admin machine, copies `kubernetes/base`, generates the secrets on the server, applies an overlay with the requested image tag, waits for every rollout and checks every API through Nginx. If the new version fails, it re-applies the previous version automatically.
+- Jenkins deploys to whichever server exists: inventory group `[app]` → `site.yml` (Docker Compose), `[k3s]` → `k3s.yml` (Kubernetes).
+
+**Autoscaling under load** ([`kubernetes/loadtest/k6-load.yaml`](kubernetes/loadtest/k6-load.yaml), a k6 Job inside the cluster: 40 virtual users searching and listing products for 3 minutes):
+
+```bash
+kubectl --kubeconfig kubernetes/kubeconfig-aws.yaml -n ecommerce apply -f kubernetes/loadtest/k6-load.yaml
+kubectl --kubeconfig kubernetes/kubeconfig-aws.yaml -n ecommerce get hpa -w
+```
+
+Measured on a `c7i-flex.large` (2 vCPU, 4 GiB): 144,542 requests (628 per second), 0% failed, average latency 6.4 ms, p95 18.7 ms. The autoscalers raised `search-service` and `product-service` from 1 to 4 pods and `frontend` from 2 to 4 (CPU up to 215% of the request), and scaled back to 1/1/2 within minutes after the test.
+
+**Rolling update and rollback without downtime:** `search-service` was updated from `894a6de` to `cf32e8d` with `kubectl set image` and returned with `kubectl rollout undo` while a client called the search API every 250 ms: 172 of 172 requests succeeded. `rollout undo` is the emergency path; the normal path is redeploying a tag with Ansible/Jenkins so the cluster always matches the manifests.
 
 ### 17.4 Deployment Roadmap
 
