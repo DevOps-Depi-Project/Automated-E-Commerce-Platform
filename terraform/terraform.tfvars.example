@@ -1,0 +1,9 @@
+# Optional overrides. Copy to terraform.tfvars (ignored by Git) and edit.
+# Every value already has a default in variables.tf.
+
+# AWS Free plan accounts are limited to their sign-up region, e.g. eu-north-1 (Stockholm).
+# aws_region    = "eu-north-1"
+# instance_type = "t3.small"
+
+# By default SSH is allowed only from the public IP of the machine running Terraform.
+# admin_cidr = "203.0.113.7/32"

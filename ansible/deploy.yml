@@ -1,0 +1,8 @@
+# Deploy another version to a server that is already set up (fast; no package changes).
+#   ansible-playbook deploy.yml -e image_tag=<commit>
+# If the new version fails its health checks, the previous version is restored automatically.
+- name: Deploy a version of the e-commerce stack
+  hosts: app
+  become: true
+  roles:
+    - app

@@ -1,0 +1,94 @@
+- name: Install packages needed for Docker's apt repository
+  ansible.builtin.apt:
+    name: [ca-certificates, curl]
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the apt keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download Docker's signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker's apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Rotate container logs so they cannot fill the disk
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+  notify: Restart Docker
+
+- name: Start Docker now and on every boot
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Let the ubuntu user run docker commands
+  ansible.builtin.user:
+    name: ubuntu
+    groups: docker
+    append: true
+
+- name: Check for a swap file
+  ansible.builtin.stat:
+    path: /swapfile
+  register: swapfile
+
+- name: Create and enable a swap file
+  when: not swapfile.stat.exists and swap_size_mb | int > 0
+  block:
+    - name: Allocate the swap file
+      ansible.builtin.command: fallocate -l {{ swap_size_mb }}M /swapfile
+      changed_when: true
+
+    - name: Restrict swap file permissions
+      ansible.builtin.file:
+        path: /swapfile
+        mode: "0600"
+
+    - name: Format and enable swap
+      ansible.builtin.shell: mkswap /swapfile && swapon /swapfile
+      changed_when: true
+
+- name: Keep swap enabled after reboot
+  when: swap_size_mb | int > 0
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: /swapfile none swap sw 0 0
+
+- name: Prefer RAM over swap (vm.swappiness=10)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-swappiness.conf
+    content: "vm.swappiness=10\n"
+    mode: "0644"
+  notify: Apply sysctl

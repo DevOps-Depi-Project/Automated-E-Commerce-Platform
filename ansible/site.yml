@@ -1,0 +1,8 @@
+# Full setup of a new server: install Docker, then deploy the application.
+#   ansible-playbook site.yml -e image_tag=80cb67d
+- name: Prepare the server and deploy the e-commerce stack
+  hosts: app
+  become: true
+  roles:
+    - docker
+    - app
