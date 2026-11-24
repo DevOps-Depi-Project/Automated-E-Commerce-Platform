@@ -1,0 +1,37 @@
+# Deploys one version (release_tag) and verifies it. Included by main.yml for the
+# requested version and, on failure, again for the previous version (rollback).
+
+- name: "Write release settings for {{ release_tag }}"
+  ansible.builtin.template:
+    src: release.env.j2
+    dest: "{{ app_dir }}/release.env"
+    mode: "0640"
+
+- name: "Pull images {{ dockerhub_user }}/ecommerce-*:{{ release_tag }}"
+  ansible.builtin.command:
+    cmd: docker compose --env-file secrets.env --env-file release.env pull --quiet
+    chdir: "{{ app_dir }}"
+  changed_when: true
+
+- name: Start or update the stack and wait for every health check
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --env-file secrets.env --env-file release.env
+      up -d --no-build --remove-orphans --wait --wait-timeout 300
+    chdir: "{{ app_dir }}"
+  changed_when: true
+
+- name: Check every public API through Nginx, like a real user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ frontend_port }}/api/{{ item }}/health"
+    status_code: 200
+  register: health
+  until: health.status == 200
+  retries: 10
+  delay: 3
+  loop: "{{ health_check_services }}"
+
+- name: Check the storefront page
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ frontend_port }}/"
+    status_code: 200

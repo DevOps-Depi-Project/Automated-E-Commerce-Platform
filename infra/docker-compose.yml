@@ -1,0 +1,31 @@
+# Infrastructure toolbox (Terraform + AWS CLI + Ansible). Run from the repository root:
+#
+#   docker compose -f infra/docker-compose.yml run --rm infra <command>
+#
+# Mounts:
+#   - the repository at /work (terraform/ and ansible/ live there)
+#   - your AWS credentials folder (~/.aws), written by "aws configure"
+#   - your SSH folder (~/.ssh) at /keys; the key pair is ~/.ssh/depi-ecommerce(.pub)
+# On Windows ~ is %USERPROFILE%; on Linux/macOS it is $HOME.
+name: ecommerce-infra
+
+services:
+  infra:
+    build: .
+    image: ecommerce-infra:local
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - ${USERPROFILE:-${HOME}}/.aws:/root/.aws
+      - ${USERPROFILE:-${HOME}}/.ssh:/keys
+      # Provider binaries (~600 MB) stay in a Docker volume, not in the (OneDrive) project folder.
+      - terraform_data:/terraform-data
+    environment:
+      AWS_PROFILE: ${AWS_PROFILE:-depi}
+      TF_DATA_DIR: /terraform-data/ecommerce
+      TF_PLUGIN_CACHE_DIR: /terraform-data/plugin-cache
+      # Explicit path: Ansible ignores ansible.cfg in world-writable folders (all Windows mounts).
+      ANSIBLE_CONFIG: /work/ansible/ansible.cfg
+
+volumes:
+  terraform_data:

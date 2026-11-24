@@ -1,0 +1,23 @@
+# Manual rollback: redeploy the version that ran before the current one.
+#   ansible-playbook rollback.yml
+# (To go back to any specific version instead: ansible-playbook deploy.yml -e image_tag=<commit>)
+- name: Roll back to the previous version
+  hosts: app
+  become: true
+  tasks:
+    - name: Read the previous version
+      ansible.builtin.slurp:
+        src: "{{ app_dir }}/PREVIOUS_TAG"
+      register: previous_tag_file
+      failed_when: false
+
+    - name: Stop if there is nothing to roll back to
+      ansible.builtin.assert:
+        that: previous_tag_file.content is defined
+        fail_msg: No previous version recorded on this server yet.
+
+    - name: Deploy the previous version
+      ansible.builtin.include_role:
+        name: app
+      vars:
+        image_tag: "{{ (previous_tag_file.content | b64decode).strip() }}"

@@ -1,0 +1,25 @@
+# Settings for every server. Override any of them on the command line, e.g.
+#   ansible-playbook deploy.yml -e image_tag=80cb67d
+
+# Where the stack lives on the server.
+app_dir: /opt/ecommerce
+
+# Images: <dockerhub_user>/ecommerce-<service>:<image_tag>. Use a commit tag (for example
+# 80cb67d) rather than "latest" so the deployed version is known and can be rolled back.
+dockerhub_user: mosab2004
+image_tag: latest
+
+# Public port of the Nginx frontend (opened in the Terraform security group).
+frontend_port: 80
+
+# Admin account created on the first deploy. The password is generated on the server.
+admin_email: admin@example.com
+
+# Roll back to the previously deployed version when the new one fails its health checks.
+auto_rollback: true
+
+# Public routes checked after every deploy (through Nginx, like a real user).
+health_check_services: [auth, product, cart, inventory, order, search]
+
+# Swap gives the 2 GiB server headroom during image pulls and restarts.
+swap_size_mb: 2048

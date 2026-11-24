@@ -1,0 +1,8 @@
+# Optional overrides. Copy to terraform.tfvars (ignored by Git) and edit.
+# Every value already has a default in variables.tf.
+
+# aws_region    = "eu-central-1"
+# instance_type = "t3.small"
+
+# By default SSH is allowed only from the public IP of the machine running Terraform.
+# admin_cidr = "203.0.113.7/32"

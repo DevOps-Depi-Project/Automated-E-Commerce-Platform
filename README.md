@@ -145,11 +145,11 @@ The project brief asks for a multi-service platform (**web, database, payment, s
 | 1. Dockerized e-commerce microservices | Done: eight services plus PostgreSQL in Docker Compose |
 | 2. CI/CD pipelines for updates | Done for CI: Jenkins builds, tests and publishes images (`Jenkinsfile`); automatic deployment is planned |
 | 3. Kubernetes deployment with auto-scaling | Planned |
-| 4. Ansible scripts for server/configuration setup | Planned |
+| 4. Ansible scripts for server/configuration setup | Done: `ansible/` installs Docker and deploys the stack on EC2 |
 | 5. Prometheus dashboards for service monitoring | In progress: every service exposes `/metrics`; Prometheus and Grafana are planned |
 | 6. Nginx reverse proxy for routing | Done: `frontend/nginx.conf` routes `/api/<service>/` |
-| 7. Terraform scripts for AWS EC2, RDS, S3, ELB | Planned |
-| 8. Automated rollback strategies | Planned |
+| 7. Terraform scripts for AWS EC2, RDS, S3, ELB | In progress: `terraform/` creates the VPC, security group and EC2 server; RDS, S3 and ELB come with the Kubernetes phase |
+| 8. Automated rollback strategies | In progress: `ansible/deploy.yml` rolls back automatically when health checks fail; Kubernetes rollouts planned |
 | 9. Git repository for code and scripts | Done |
 
 ## 5. Team Members
@@ -591,7 +591,69 @@ The job scans the GitHub repository every 2 minutes and builds any branch that h
 
 The admin password and the Docker Hub token are passed as Docker secrets (files in `/run/secrets`), not environment variables, so builds cannot print them. On Linux, set `DOCKER_SOCKET_GID` in `jenkins/.env` to the group id of `/var/run/docker.sock`.
 
-### 17.2 Deployment Roadmap
+### 17.2 Deploying to AWS (Terraform + Ansible)
+
+The first cloud deployment runs the whole stack with Docker Compose on one EC2 server. Terraform creates the infrastructure, Ansible configures the server and deploys a tested image version from Docker Hub.
+
+```text
+terraform/  ->  VPC, public subnet, internet gateway, security group (HTTP for everyone,
+                SSH only from your IP), key pair, Ubuntu 24.04 EC2 (t3.small), Elastic IP,
+                and ansible/inventory/hosts.ini with the server's IP
+ansible/    ->  site.yml     install Docker (+ log rotation, swap) and deploy
+                deploy.yml   deploy another version; automatic rollback if it fails
+                rollback.yml go back to the previous version
+```
+
+All three tools run in a toolbox container (`infra/`), so nothing has to be installed on Windows (Ansible does not run on Windows). Every command below is run from the repository root.
+
+**One-time preparation**
+
+1. In the AWS console: create an IAM user for deployments with the `AmazonEC2FullAccess` policy and an access key (do not use the root account). Also create a monthly cost budget with an e-mail alert (Billing → Budgets).
+2. Build the toolbox and store the access key in your local AWS profile (`~/.aws`, never in the repository):
+
+   ```bash
+   docker compose -f infra/docker-compose.yml build
+   docker compose -f infra/docker-compose.yml run --rm infra aws configure --profile depi
+   docker compose -f infra/docker-compose.yml run --rm infra aws sts get-caller-identity
+   ```
+
+3. Create the SSH key pair that Terraform installs on the server and Ansible uses:
+
+   ```bash
+   docker compose -f infra/docker-compose.yml run --rm infra ssh-keygen -t ed25519 -N "" -C depi-ecommerce -f /keys/depi-ecommerce
+   ```
+
+**Create the server and deploy**
+
+```bash
+docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terraform init
+docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terraform plan -out=tfplan
+docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terraform apply tfplan
+docker compose -f infra/docker-compose.yml run --rm -w /work/ansible infra ansible-playbook site.yml -e image_tag=<commit>
+```
+
+Use a commit tag that Jenkins published (for example `80cb67d`). The playbook prints the storefront URL. Secrets (database password, JWT secret, admin password) are generated on the server on the first deploy and never leave it; read the admin password with `sudo grep ADMIN_PASSWORD /opt/ecommerce/secrets.env` on the server.
+
+**Deploy a new version and roll back**
+
+```bash
+docker compose -f infra/docker-compose.yml run --rm -w /work/ansible infra ansible-playbook deploy.yml -e image_tag=<new-commit>
+docker compose -f infra/docker-compose.yml run --rm -w /work/ansible infra ansible-playbook rollback.yml
+```
+
+`deploy.yml` waits for every container health check and then calls every public API through Nginx. If the new version fails, it automatically redeploys the version that was running before and reports the failure. The history is kept on the server in `/opt/ecommerce/releases.log`.
+
+**Cost control**
+
+The server costs money while it exists (t3.small, 20 GB disk and public IP: roughly 2 US cents per hour). CPU credits are set to `standard`, so there are no burst charges. Delete everything after a session and recreate it from code next time:
+
+```bash
+docker compose -f infra/docker-compose.yml run --rm infra terraform -chdir=terraform destroy
+```
+
+Terraform state (`terraform/terraform.tfstate`) is local and ignored by Git; for team use it should move to an S3 backend.
+
+### 17.3 Deployment Roadmap
 
 The project proposal includes a broader DevOps direction:
 
