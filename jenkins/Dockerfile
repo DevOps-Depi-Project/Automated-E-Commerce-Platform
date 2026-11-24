@@ -1,6 +1,6 @@
 # Local Jenkins controller for the e-commerce CI pipeline.
 # Adds the tools the Jenkinsfile needs:
-#   - Docker CLI + Compose plugin: build images and run the test stack on the host's
+#   - Docker CLI + Buildx + Compose plugin: build images and run the test stack on the host's
 #     Docker engine through the mounted /var/run/docker.sock
 #   - Node.js 22: run the unit and end-to-end tests
 # Plugins and configuration are baked in (Configuration as Code), so no setup wizard.
@@ -19,7 +19,7 @@ RUN apt-get update \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
       > /etc/apt/sources.list.d/docker.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+ && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin docker-compose-plugin \
  && rm -rf /var/lib/apt/lists/*
 
 # Node.js from the official image (same Debian base, no curl | bash installer).

@@ -15,7 +15,11 @@ const lines = [
   `INTERNAL_SERVICE_TOKEN=${random(32)}`,
   'ADMIN_EMAIL=ci-admin@example.com',
   `ADMIN_PASSWORD=Ci-${random(12)}`,
-  'ADMIN_NAME=CI Admin'
+  // No spaces in values: the Jenkinsfile loads this file with the shell (". ./ci.env").
+  'ADMIN_NAME=CI-Admin'
 ];
+
+const unsafe = lines.filter(line => !line.startsWith('#') && /\s/.test(line));
+if (unsafe.length) throw new Error(`ci.env values must not contain whitespace: ${unsafe.join(', ')}`);
 
 process.stdout.write(lines.join('\n') + '\n');
